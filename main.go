@@ -73,7 +73,7 @@ func main() {
 	}
 	switch cmd {
 	case "info", "verify", "layers", "tree", "audit", "stats":
-		fail(exitUsage, "%s is not implemented yet", cmd)
+		os.Exit(run())
 	default:
 		fail(exitUsage, "unknown command %q", cmd)
 	}
