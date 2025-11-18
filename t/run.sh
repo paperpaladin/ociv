@@ -320,6 +320,56 @@ for name in unknown-algorithm zstd-layer; do
 done
 
 echo
+echo "--- the digest grammar, against skopeo ---"
+# Twelve spellings of one digest, each in an otherwise valid image with a
+# copy of the manifest blob at the path that spelling names. Without that
+# copy every case would die at "no such file" and the grammar would never
+# be reached: a test that passes for a reason unrelated to what it claims.
+#
+# Two assertions per case. The first is skopeo's verdict against ours,
+# which is the external authority. The second is the finding CODE, and it
+# is the one that matters: a malformed digest string must be reported as
+# V008, not as V012. Every one of these images also fails the content
+# comparison -- the blob at the alternate path hashes to the canonical
+# spelling -- so a reader with no grammar at all still exits 1, and three
+# separate mutations of the grammar survived a suite that only checked the
+# exit status.
+dgcase() {
+	name=$1; wantrc=$2; wantcode=$3
+	rm -rf "$W/sk"
+	if skopeo copy "oci:$IMG/dg-$name:latest" "dir:$W/sk" >/dev/null 2>&1; then sk=accept; else sk=reject; fi
+	out=$("$OCIV" verify "$IMG/dg-$name" 2>&1); rc=$?
+	eq "digest $name: exit status" "$wantrc" "$rc"
+	if [ "$sk" = reject ] && [ "$rc" = 0 ]; then
+		bad "digest $name: skopeo rejects it and ociv accepts it"
+	else
+		ok "digest $name: skopeo says $sk, ociv exits $rc"
+	fi
+	if [ -n "$wantcode" ]; then
+		if echo "$out" | grep -q "$wantcode"; then
+			ok "digest $name reports $wantcode"
+		else
+			bad "digest $name did not report $wantcode"
+			echo "$out" | sed "s/^/       /" | head -3
+		fi
+	fi
+}
+dgcase upper        1 V008
+dgcase short        1 V008
+dgcase long         1 V008
+dgcase trailsep     1 V008
+dgcase leadsep      1 V008
+dgcase dblsep       1 V008
+dgcase nocolon      1 V008
+dgcase emptyalg     1 V008
+dgcase emptyenc     1 V008
+dgcase badchar      1 V008
+# Grammatically valid, algorithm we cannot compute. A refusal, not an
+# accusation: the image may be perfectly good and we cannot tell.
+dgcase unregistered 3 ""
+dgcase sha512       3 ""
+
+echo
 echo "--- what skopeo thinks of the same bytes ---"
 # Recorded as a measurement, not as an assertion that the two agree: they
 # do not, and the divergences are the interesting part. The assertion is

@@ -221,6 +221,11 @@ func run() int {
 	cmd, arg := args[0], args[1]
 	im, err := OpenImage(arg)
 	if err != nil {
+		if im != nil {
+			for _, f := range im.Findings {
+				fmt.Printf("BAD %s %s: %s\n", f.Code, f.Where, f.Detail)
+			}
+		}
 		if IsInvalid(err) {
 			fail(exitInvalid, "%v", err)
 		}

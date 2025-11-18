@@ -9,8 +9,9 @@ ociv has already agreed with.
 
 Standard library only.
 
-    oci.py assemble DIR [--gzip] [--mt MEDIATYPE] [--tag NAME] LAYER.tar...
-    oci.py break    SRC DST DEFECT
+    oci.py assemble    DIR [--gzip] [--mt MEDIATYPE] [--tag NAME] LAYER.tar...
+    oci.py break       SRC DST DEFECT
+    oci.py digestcases SRC OUTDIR
 """
 import gzip
 import hashlib
@@ -232,6 +233,54 @@ def break_image(src, dst, defect):
     return dst
 
 
+# ---------------------------------------------------------------------------
+# Digest grammar cases.
+#
+# Each one spells index.json's manifest digest differently and puts a copy
+# of the manifest blob at the path that spelling names, so that the only
+# thing wrong with the image is the digest string itself. Without the copy
+# every case would fail at "no such file" and the grammar would never be
+# reached, which is a test that passes for the wrong reason.
+#
+# skopeo is the oracle: it rejects ten of the twelve, and the two it does
+# not are recorded as divergences rather than smoothed over.
+# ---------------------------------------------------------------------------
+
+def digest_cases(src, outdir):
+    idx = read_index(src)
+    real = idx["manifests"][0]["digest"]
+    enc = real.split(":", 1)[1]
+    cases = {
+        "upper":        "sha256:" + enc.upper(),
+        "short":        "sha256:abcd",
+        "long":         "sha256:" + enc + "00",
+        "trailsep":     "sha256+:" + enc,
+        "leadsep":      "+sha256:" + enc,
+        "dblsep":       "sha256++x:" + enc,
+        "nocolon":      "sha256" + enc,
+        "emptyalg":     ":" + enc,
+        "emptyenc":     "sha256:",
+        "badchar":      "sha256:" + enc[:-1] + "*",
+        "unregistered": "multihash+base58:QmWvQxTqbG2Z9HPJgG57jjwR154cKhbtJenbyYTWkjgF3e",
+        "sha512":       "sha512:" + "a" * 128,
+    }
+    for name, dg in sorted(cases.items()):
+        d = os.path.join(outdir, "dg-" + name)
+        shutil.rmtree(d, ignore_errors=True)
+        shutil.copytree(src, d)
+        if ":" in dg:
+            alg, e2 = dg.split(":", 1)
+            if alg and e2 and "/" not in alg and "/" not in e2:
+                tgt = os.path.join(d, "blobs", alg, e2)
+                os.makedirs(os.path.dirname(tgt), exist_ok=True)
+                shutil.copy(os.path.join(d, "blobs", "sha256", enc), tgt)
+        i2 = read_index(d)
+        i2["manifests"][0]["digest"] = dg
+        with open(os.path.join(d, "index.json"), "wb") as f:
+            f.write(jdump(i2))
+        print("dg-" + name)
+
+
 def _replace_manifest(d, olddg, man):
     """Rewrite the manifest blob and point index.json at the new one, so the
     only thing wrong with the image is the defect under test."""
@@ -295,6 +344,8 @@ def main(argv):
         assemble(d, layers, use_gzip=use_gzip, mediatype=mt, tag=tag)
     elif cmd == "break":
         break_image(argv[2], argv[3], argv[4])
+    elif cmd == "digestcases":
+        digest_cases(argv[2], argv[3])
     else:
         sys.exit("unknown subcommand %r" % cmd)
 

@@ -188,4 +188,8 @@ for defect in corrupt-layer corrupt-config wrong-size missing-blob \
 	python3 "$HERE/oci.py" break "$W/img/multi" "$W/img/bad-$defect" "$defect"
 done
 
+# Digest grammar cases, built off the smallest image so the only variable
+# is the spelling of one string.
+python3 "$HERE/oci.py" digestcases "$W/img/single" "$W/img" > /dev/null
+
 echo "corpus built in $W" >&2

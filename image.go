@@ -359,16 +359,16 @@ func OpenImage(arg string) (*Image, error) {
 		return nil, err
 	}
 	im := &Image{Path: path, Selector: sel}
+	// The image is returned even when opening fails, because the
+	// findings collected on the way are the useful part of the answer.
+	// Returning nil here printed "no such blob" for a malformed digest
+	// string and swallowed the V008 that said why the path was wrong:
+	// ten assertions about the digest grammar failed for that reason and
+	// none of them was about the grammar.
 	if st.IsDir() {
-		if err := im.openLayout(); err != nil {
-			return nil, err
-		}
-		return im, nil
+		return im, im.openLayout()
 	}
-	if err := im.openArchive(); err != nil {
-		return nil, err
-	}
-	return im, nil
+	return im, im.openArchive()
 }
 
 // openArchive reads a "docker save" tar. The format predates OCI and is
