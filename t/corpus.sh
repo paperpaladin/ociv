@@ -44,8 +44,13 @@ printf 'verbose=0\n' > "$R/m0/etc/config.ini"
 printf '\177ELF\002\001\001 placeholder application\n' > "$R/m0/usr/bin/app"
 printf '\177ELF\002\001\001 placeholder library\n' > "$R/m0/usr/lib/libx.so"
 printf 'boot ok\n' > "$R/m0/var/log/app.log"
+# A sibling whose name shares a prefix with a directory a later layer
+# whiteouts. "var/log" must go and "var/logrotate.conf" must stay; a
+# descendant test that forgets the slash removes both.
+printf 'weekly\n' > "$R/m0/var/logrotate.conf"
 printf 'rotated\n' > "$R/m0/var/log/old.log"
 for f in a b c; do printf 'data %s\n' "$f" > "$R/m0/opt/data/$f"; done
+printf 'a sibling of the opaque directory\n' > "$R/m0/opt/database"
 printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\nnotarealkey\n' > "$R/m0/home/user/.ssh/id_rsa"
 chmod 0600 "$R/m0/etc/secrets.txt" "$R/m0/home/user/.ssh/id_rsa"
 chmod 0755 "$R/m0/usr/bin/app"
@@ -62,7 +67,10 @@ ln -s usr/bin "$R/m1/bin"
 printf 'verbose=1\ntoken=ghp_0000000000000000000000000000000000\n' > "$R/m1/etc/config.ini"
 chmod 4755 "$R/m1/usr/bin/helper"
 chmod 2755 "$R/m1/usr/sbin/tool"
-mk m1 gnu 1000 1000 "$R/m1"
+# uid 1000 and gid 100, not 1000 and 1000. Every other layer here is 0:0,
+# and with uid equal to gid everywhere a reader that swapped the two
+# fields would agree with GNU tar on every entry in the corpus.
+mk m1 gnu 1000 100 "$R/m1"
 
 # L2: the deletions. A plain whiteout over the credential file, an opaque
 # directory, and one more overwrite.
@@ -177,9 +185,31 @@ python3 "$HERE/mktar.py" escape "$L/escape.tar"
 python3 "$HERE/oci.py" assemble "$W/img/escape" "$L/escape.tar" > "$W/img/escape.digest"
 
 # ---------------------------------------------------------------------------
+# opq: an opaque marker in a layer that re-adds no directory entries, so
+# that "the marker empties the directory" and "the marker deletes the
+# directory" produce different answers. Every tar built from a directory
+# tree carries its parents, which makes the two indistinguishable.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" opq-base "$L/opqbase.tar"
+python3 "$HERE/mktar.py" opq-mark "$L/opqmark.tar"
+python3 "$HERE/oci.py" assemble "$W/img/opq" "$L/opqbase.tar" "$L/opqmark.tar" > "$W/img/opq.digest"
+
+# ---------------------------------------------------------------------------
+# samelayer: a whiteout AFTER a file of the same name inside one layer.
+# The spec says a whiteout applies only to the layers below it, so the
+# file survives. A reader that walks the archive once in tar order deletes
+# it. ".wh.keepme" sorts before "keepme", so this order cannot come out of
+# tar --sort=name and the archive is written by hand.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" wh-base "$L/whbase.tar"
+python3 "$HERE/mktar.py" wh-same "$L/whsame.tar"
+python3 "$HERE/oci.py" assemble "$W/img/samelayer" "$L/whbase.tar" "$L/whsame.tar" > "$W/img/samelayer.digest"
+
+# ---------------------------------------------------------------------------
 # Broken images. One named defect each.
 # ---------------------------------------------------------------------------
-for defect in corrupt-layer corrupt-config wrong-size missing-blob \
+for defect in corrupt-layer corrupt-config corrupt-config-valid \
+	      corrupt-manifest-valid wrong-size missing-blob \
 	      bad-digest-string unknown-algorithm no-oci-layout \
 	      bad-layout-version bad-schema-version empty-index \
 	      diffid-mismatch diffid-count bad-rootfs-type \

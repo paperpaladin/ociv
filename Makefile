@@ -16,6 +16,16 @@ ociv: $(wildcard *.go) go.mod
 
 test: all
 	./t/run.sh
+	@echo
+	@echo "[mutants] three planted defects: one must survive, two must be caught"
+	./t/mutate.py --smoke
+
+# The full sweep: every planted defect, each rebuilt and run against the
+# whole suite. Minutes, not seconds, which is why "make test" runs three
+# of them instead. It exits nonzero if any mutant behaves unlike the
+# record in t/mutate.py, in either direction.
+mutants: all
+	./t/mutate.py
 
 vet: 
 	$(GO) vet ./...
@@ -24,4 +34,4 @@ clean:
 	rm -f ociv
 	rm -rf t/tmp.*
 
-.PHONY: all test vet clean
+.PHONY: all test mutants vet clean

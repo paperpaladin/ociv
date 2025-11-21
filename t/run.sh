@@ -103,9 +103,11 @@ layers_of() {
 	dup)     echo "$L/dup.tar" ;;
 	xattr)   echo "$L/xa.tar $L/caps.tar" ;;
 	escape)  echo "$L/escape.tar" ;;
+	opq)     echo "$L/opqbase.tar $L/opqmark.tar" ;;
+	samelayer) echo "$L/whbase.tar $L/whsame.tar" ;;
 	esac
 }
-GOOD="single multi multigz longgnu longpax dup xattr escape"
+GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer"
 
 # The census, from the Python reader, summed over every image. Printed
 # because a reader has to be able to see that the corpus contains what the
@@ -252,6 +254,38 @@ for img in $GOOD; do
 done
 
 echo
+echo "--- the three whiteout rules, stated as facts about named paths ---"
+# These are the rules implementations get wrong, each asserted against a
+# path that exists for the purpose. The Python comparison above covers
+# them too, but a line-for-line diff of two tree listings says "they
+# differ" and these say which rule broke.
+has() {  # has NAME IMAGE PATH -- the merged tree contains this path
+	h=$(printf '%s' "$3" | od -An -tx1 | tr -d ' \n')
+	if "$OCIV" tree "$IMG/$2" | grep -q "phex=$h\$"; then ok "$1"; else bad "$1 ($3 missing from $2)"; fi
+}
+hasnt() {
+	h=$(printf '%s' "$3" | od -An -tx1 | tr -d ' \n')
+	if "$OCIV" tree "$IMG/$2" | grep -q "phex=$h\$"; then bad "$1 ($3 still present in $2)"; else ok "$1"; fi
+}
+hasnt "a plain whiteout removes its target"            multi etc/secrets.txt
+hasnt "a directory whiteout takes the subtree with it" multi var/log/app.log
+hasnt "and the directory itself"                       multi var/log
+has   "but not a sibling sharing its prefix"           multi var/logrotate.conf
+hasnt "an opaque marker empties the directory"         multi opt/data/a
+has   "and leaves the directory"                       multi opt/data
+has   "and the current layer entries under it"         multi opt/data/new
+has   "and a sibling sharing its prefix"               multi opt/database
+hasnt "an opaque marker in a layer with no directory entries still empties it" opq opt/data/a
+has   "and the directory survives from the lower layer"                        opq opt/data
+has   "and so does the prefix sibling"                                         opq opt/database
+has   "a whiteout does not remove a file from its OWN layer"   samelayer etc/keepme
+hasnt "but does remove the same name from a lower layer"       samelayer etc/gone
+# And the surviving file is the new version, not the old one resurrected.
+newsha="sha256:$(printf 'the new version\n' | sha256sum | cut -d" " -f1)"
+gotsha=$("$OCIV" tree "$IMG/samelayer" | awk -v h="$(printf 'etc/keepme' | od -An -tx1 | tr -d " \n")" '$0 ~ ("phex=" h "$") {for(i=1;i<=NF;i++) if ($i ~ /^content=/) print substr($i,9)}')
+eq "the survivor is this layer's version of the file" "$newsha" "$gotsha"
+
+echo
 echo "--- gzip: the descriptor digest and the diff_id are different numbers ---"
 # An uncompressed image cannot tell a reader that conflates the two apart
 # from a correct one, because there they are equal.
@@ -290,6 +324,12 @@ check_bad() {
 }
 check_bad corrupt-layer            1 "V012"
 check_bad corrupt-config           1 ""
+# The config and the manifest corrupted so that they still parse. Only the
+# digest comparison can see these, and without them a mutation that
+# deleted that comparison outright survived the whole suite: every other
+# corruption in the corpus also broke the JSON.
+check_bad corrupt-config-valid     1 "V012"
+check_bad corrupt-manifest-valid   1 "V012"
 check_bad wrong-size               1 "V011"
 check_bad missing-blob             1 "V010"
 check_bad bad-digest-string        1 "V008"

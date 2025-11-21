@@ -21,8 +21,12 @@ construction, written from POSIX.1-2001 section 20.1 (ustar) and the pax
 extended header format. It is not a general tar writer and is not used
 outside the corpus.
 
-    mktar.py caps OUT.tar
-    mktar.py escape OUT.tar
+    mktar.py caps     OUT.tar
+    mktar.py escape   OUT.tar
+    mktar.py opq-base OUT.tar
+    mktar.py opq-mark OUT.tar
+    mktar.py wh-base  OUT.tar
+    mktar.py wh-same  OUT.tar
 """
 import sys
 
@@ -196,10 +200,75 @@ def build_escape(path):
     open(path, "wb").write(finish(parts))
 
 
+def build_opq_base(path):
+    """A directory with contents, and a SIBLING whose name shares its
+    prefix. Whiteouting "opt/data" must not touch "opt/database"; a
+    descendant test that forgets the slash removes both and nothing in a
+    corpus without such a sibling would notice."""
+    parts = [
+        plain_entry("./", mode=0o755, typeflag=b"5"),
+        plain_entry("./opt/", mode=0o755, typeflag=b"5"),
+        plain_entry("./opt/data/", mode=0o755, typeflag=b"5"),
+        plain_entry("./opt/data/a", content=b"alpha\n"),
+        plain_entry("./opt/data/b", content=b"bravo\n"),
+        plain_entry("./opt/database", content=b"a sibling, not a child\n"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
+def build_opq_mark(path):
+    """A layer holding ONLY the opaque marker: no directory entries at all.
+
+    Every layer GNU tar builds from a directory tree carries the parent
+    directories, so in such a corpus an implementation that lets the
+    opaque marker delete the directory ITSELF is indistinguishable from a
+    correct one -- the directory is immediately re-added by the same
+    layer. This layer re-adds nothing, so the two behaviours differ."""
+    parts = [plain_entry("./opt/data/" + WH_OPAQUE)]
+    open(path, "wb").write(finish(parts))
+
+
+def build_wh_base(path):
+    parts = [
+        plain_entry("./", mode=0o755, typeflag=b"5"),
+        plain_entry("./etc/", mode=0o755, typeflag=b"5"),
+        plain_entry("./etc/keepme", content=b"the old version\n"),
+        plain_entry("./etc/gone", content=b"PRIVATE KEY MATERIAL\n", mode=0o600),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
+def build_wh_same(path):
+    """A whiteout AFTER a file of the same name, in one layer.
+
+    The spec is explicit: a whiteout applies to the layers below it and
+    never to the layer it appears in. So etc/keepme must survive with this
+    layer's contents even though etc/.wh.keepme follows it in the archive.
+    An implementation that walks the archive once in order deletes it.
+
+    The order matters and cannot be produced by "tar --sort=name", because
+    ".wh.keepme" sorts before "keepme" and a one-pass reader then gets the
+    right answer by accident."""
+    parts = [
+        plain_entry("./etc/keepme", content=b"the new version\n"),
+        plain_entry("./etc/" + WH_PREFIX + "keepme"),
+        plain_entry("./etc/" + WH_PREFIX + "gone"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
+WH_PREFIX = ".wh."
+WH_OPAQUE = ".wh..wh..opq"
+
+BUILDERS = {"caps": build_caps, "escape": build_escape,
+            "opq-base": build_opq_base, "opq-mark": build_opq_mark,
+            "wh-base": build_wh_base, "wh-same": build_wh_same}
+
+
 def main(argv):
     if len(argv) != 3:
         sys.exit(__doc__)
-    {"caps": build_caps, "escape": build_escape}[argv[1]](argv[2])
+    BUILDERS[argv[1]](argv[2])
 
 
 if __name__ == "__main__":

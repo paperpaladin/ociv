@@ -221,14 +221,12 @@ func (im *Image) LayerEntries(i int, wantContent bool) ([]Entry, string, error) 
 				e.Xattrs[strings.TrimPrefix(k, "SCHILY.xattr.")] = v
 			}
 		}
-		for k, v := range h.Xattrs {
-			if e.Xattrs == nil {
-				e.Xattrs = map[string]string{}
-			}
-			if _, seen := e.Xattrs[k]; !seen {
-				e.Xattrs[k] = v
-			}
-		}
+		// There is deliberately no second pass over h.Xattrs. Go's tar
+		// reader fills that deprecated field from the very same
+		// SCHILY.xattr records, so reading both was two routes to one
+		// fact -- and a mutation that switched the pax route off was
+		// invisible, because the duplicate quietly carried on working.
+		// Redundant code is a test hole with a plausible explanation.
 		e.Path, e.Escapes, e.EscapeWhy = cleanPath(h.Name)
 		e.Whiteout, e.WhTarget = classifyWhiteout(e.Path)
 

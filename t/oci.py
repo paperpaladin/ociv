@@ -152,6 +152,22 @@ def break_image(src, dst, defect):
             f.seek(0)
             f.write(b" ")       # a leading space: still valid JSON, wrong digest
 
+    elif defect == "corrupt-config-valid":
+        # A trailing newline. The config is still valid JSON and still
+        # parses into the same object, so only the digest comparison can
+        # see it. corrupt-config breaks the JSON as well, which means a
+        # reader with no digest check at all still fails on the parse --
+        # and a mutation that deleted the digest check survived for
+        # exactly that reason.
+        p = blobpath(dst, man["config"]["digest"])
+        with open(p, "ab") as f:
+            f.write(b"\n")
+
+    elif defect == "corrupt-manifest-valid":
+        p = blobpath(dst, mdg)
+        with open(p, "ab") as f:
+            f.write(b" ")
+
     elif defect == "wrong-size":
         # The blob is fine, the descriptor lies about its length. A reader
         # that hashes the file and never looks at size accepts this.
