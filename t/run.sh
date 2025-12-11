@@ -519,6 +519,80 @@ for img in $GOOD; do
 done
 
 echo
+echo "--- malformed input: truncation and corruption at every stride ---"
+# An image is attacker-controlled data in any tool that reads one from a
+# stranger, and the failure mode to rule out here is not a wrong answer,
+# it is a panic, an unbounded allocation or a hang. Every length in an OCI
+# image comes out of the image.
+#
+# Before believing the sweep, check that it can report a failure. Two
+# stand-ins are run through the same harness: one that always exits 86,
+# which is the status ociv gives a recovered panic, and one that hangs.
+# A sweep whose crash detector is broken reports a clean score over
+# whatever it likes.
+cat > "$W/stub-panic" <<'STUB'
+#!/bin/sh
+exit 86
+STUB
+cat > "$W/stub-hang" <<'STUB'
+#!/bin/sh
+sleep 30
+STUB
+chmod +x "$W/stub-panic" "$W/stub-hang"
+out=$(python3 ./t/sweep.py "$W/stub-panic" "$IMG/single" --stride 100000 --timeout 3 --max-runs 1 2>&1)
+if echo "$out" | grep -q "SWEEPFAIL.*panic"; then
+	ok "the sweep reports a panic when the program panics"
+else
+	bad "the sweep did not notice a program that always exits 86"
+	echo "$out" | sed 's/^/       /' | head -5
+fi
+out=$(python3 ./t/sweep.py "$W/stub-hang" "$IMG/single" --stride 100000 --timeout 2 --max-runs 1 2>&1)
+if echo "$out" | grep -q "SWEEPFAIL.*timeout"; then
+	ok "the sweep reports a timeout when the program hangs"
+else
+	bad "the sweep did not notice a program that hangs"
+	echo "$out" | sed 's/^/       /' | head -5
+fi
+# And a sweep in which nothing is rejected must call itself vacuous: a
+# clean score over inputs that all produced exit 0 has checked nothing.
+cat > "$W/stub-ok" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+chmod +x "$W/stub-ok"
+out=$(python3 ./t/sweep.py "$W/stub-ok" "$IMG/single" --stride 100000 --timeout 3 2>&1)
+if echo "$out" | grep -q "VACUOUS"; then
+	ok "the sweep calls itself vacuous when nothing is rejected"
+else
+	bad "a sweep that rejected nothing reported success"
+fi
+
+# The stride is tunable because t/mutate.py reruns this whole suite once
+# per planted defect, and a sweep dense enough to be worth running once is
+# too slow to run thirty-four times. The mutation harness sets it coarse;
+# a direct "make test" uses 251. "make sweep" runs a dense one at 7.
+SWEEP_STRIDE=${OCIV_SWEEP_STRIDE:-251}
+for img in multi multigz xattr; do
+	if python3 ./t/sweep.py "$OCIV" "$IMG/$img" --stride "$SWEEP_STRIDE" --timeout 20 > "$W/sweep.$img" 2>&1; then
+		ok "$img sweep: $(tail -1 "$W/sweep.$img")"
+	else
+		bad "$img sweep"
+		sed 's/^/       /' "$W/sweep.$img" | head -14
+	fi
+	sed 's/^/     /' "$W/sweep.$img" | head -4
+done
+
+# Inputs that are not images at all.
+printf 'not an image\n' > "$W/notanimage"
+mkdir -p "$W/emptydir"
+printf 'x' > "$W/emptydir/index.json"
+for cmd in verify info layers tree audit stats; do
+	status "$cmd on a text file is usage or invalid, never a crash" 2 "$OCIV" "$cmd" "$W/notanimage"
+done
+status "a directory with a one-byte index.json is invalid" 1 "$OCIV" verify "$W/emptydir"
+status "/dev/null is not an image"                         2 "$OCIV" verify /dev/null
+
+echo
 echo "--- docker-archive: the other container format ---"
 # skopeo writes it, so the conversion is not ours and the thing being
 # tested is whether we can read what another implementation wrote.

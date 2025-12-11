@@ -31,6 +31,18 @@ test: all
 mutants: all
 	./t/mutate.py
 
+# The dense malformed-input sweep, at a stride of 7 over seven images.
+# "make test" runs the same thing at 251, because this takes minutes.
+sweep: all
+	@d=$$(mktemp -d "$${TMPDIR:-/tmp}/ocivsweep.XXXXXX"); \
+	 trap "rm -rf $$d" EXIT; \
+	 ./t/corpus.sh $$d >/dev/null 2>&1 || exit 1; \
+	 rc=0; \
+	 for i in single multi multigz xattr escape longpax opq samelayer; do \
+	   echo "== $$i"; ./t/sweep.py ./ociv $$d/img/$$i --stride 7 --timeout 20 || rc=1; \
+	 done; \
+	 rm -rf $$d; exit $$rc
+
 vet: 
 	$(GO) vet ./...
 
@@ -38,4 +50,4 @@ clean:
 	rm -f ociv
 	rm -rf t/tmp.*
 
-.PHONY: all test mutants vet clean
+.PHONY: all test mutants sweep vet clean

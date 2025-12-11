@@ -13,6 +13,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 )
 
 // Exit statuses. These are three different claims and the test harness
@@ -23,6 +24,13 @@ const (
 	exitInvalid = 1 // the image is invalid: a fact about the image
 	exitUsage   = 2 // bad arguments, or the path cannot be read
 	exitRefuse  = 3 // ociv does not implement what this image needs
+
+	// A Go panic normally leaves by status 2, which is also this
+	// program's usage error. A sweep over truncated and corrupted
+	// images would then record a crash as a clean diagnostic, which is
+	// the exact failure the sweep exists to detect. 86 is chosen
+	// because nothing else here can produce it.
+	exitPanic = 86
 )
 
 const usage = `usage: ociv COMMAND IMAGE
@@ -58,6 +66,12 @@ func refuse(format string, a ...any) {
 }
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "ociv: INTERNAL PANIC: %v\n%s\n", r, debug.Stack())
+			os.Exit(exitPanic)
+		}
+	}()
 	args := os.Args[1:]
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)

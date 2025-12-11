@@ -112,6 +112,10 @@ MUTANTS = [
      [("\t\t// Pass two: this layer's real entries, in tar order, so a path",
        "\t\tif false {\n\t\t\t_ = ents\n\t\t}\n\t\t// Pass two: this layer's real entries, in tar order, so a path")],
      'EQUIVALENT BY CONSTRUCTION: a dead branch. It must survive. If it is ever reported as CAUGHT the harness is reporting failures that are not caused by the mutation'),
+    ('plant-panic', 'layer.go',
+     [('\t\t\treturn out, "", fmt.Errorf("layer %d entry %d: %w", i, n, err)',
+       '\t\t\tpanic(fmt.Sprintf("layer %d entry %d: %v", i, n, err))')],
+     'panic instead of returning an error on a malformed tar. Reachable only from a corrupted image, so ONLY the truncation and corruption sweep can see it: it is the end-to-end check that a real panic inside ociv becomes exit 86 and is reported'),
     ('merge-onepass', 'merge.go',
      [("\t\t// Pass one: whiteouts, against the lower layers only.\n\t\tfor _, e := range ents {",
        "\t\t// Pass one: whiteouts, against the lower layers only.\n\t\tfor _, e := range []Entry(nil) {"),
@@ -256,8 +260,15 @@ def run_one(name, keep_log=None):
                 shutil.copy(os.path.join(ROOT, f), work)
         shutil.copytree(os.path.join(ROOT, "t"), os.path.join(work, "t"))
         apply(work, name)
-        env = dict(os.environ, GOPROXY="off", GOFLAGS="", GOCACHE=os.environ.get(
-            "GOCACHE", os.path.expanduser("~/.cache/go-build")))
+        # A coarse sweep: the suite is rerun once per mutant and a dense
+        # one would make this harness unusable. The sweep's own density
+        # is a "make test" concern; what matters here is only that the
+        # error paths are reached at all, which a coarse stride still
+        # does. plant-panic is caught at 1009.
+        env = dict(os.environ, GOPROXY="off", GOFLAGS="",
+                   OCIV_SWEEP_STRIDE="1009",
+                   GOCACHE=os.environ.get(
+                       "GOCACHE", os.path.expanduser("~/.cache/go-build")))
         b = subprocess.run(["go", "build", "-o", "ociv", "."], cwd=work,
                            capture_output=True, text=True, env=env)
         if b.returncode != 0:
