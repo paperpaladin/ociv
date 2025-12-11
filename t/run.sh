@@ -254,6 +254,85 @@ for img in $GOOD; do
 done
 
 echo
+echo "--- oracle: GNU tar actually extracting the layers ---"
+# The strongest oracle for the merge, because nothing here argues about
+# what the spec means: tar unpacks the layers in order onto a real
+# filesystem and the result is read back with lstat. The only part that is
+# not tar is four lines of rm -rf driven by the whiteout markers tar just
+# extracted.
+#
+# Three things it cannot see, each handled rather than hidden. uid and gid
+# are the invoking user's, because extraction is unprivileged; ownership is
+# covered by the per-entry GNU tar listing comparison instead. Device nodes
+# need mknod and are dropped from both sides. A symlink's permission bits
+# are not stored by Linux at all, so the mode of a symlink is compared as
+# "-" on both sides; the header's value is still checked against GNU tar's
+# listing, where it is a real fact.
+ocivfs() {   # ociv tree -> the same shape the extraction prints
+	awk '{t=$2; m=$3; sz=$6; c="-"; l="-"; p="";
+	      for (i=7; i<=NF; i++) {
+	        if ($i ~ /^content=/) c = substr($i,9);
+	        if ($i ~ /^link=/)    l = substr($i,6);
+	        if ($i ~ /^phex=/)    p = substr($i,6); }
+	      ty = "?";
+	      if (t=="file" || t=="hardlink") ty = "f";
+	      if (t=="dir")      ty = "d";
+	      if (t=="symlink")  ty = "l";
+	      if (t=="chardev")  ty = "c";
+	      if (t=="blockdev") ty = "b";
+	      if (t=="fifo")     ty = "p";
+	      if (ty=="c" || ty=="b") next;
+	      if (ty=="l") m = "-";
+	      if (t=="hardlink") l = "-";
+	      printf "fnode %s %s %s %s %s %s\n", ty, m, sz, c, l, p }' | sort -k7
+}
+extractfs() {  # extract.sh -> the same, with nlink dropped
+	awk '{ if ($2=="c" || $2=="b") next;
+	       m = ($2=="l") ? "-" : $3;
+	       printf "fnode %s %s %s %s %s %s\n", $2, m, $4, $6, $7, $8 }' | sort -k7
+}
+# escape is excluded: GNU tar strips "../" and a leading "/" when it
+# extracts, so the paths on disk are not the paths in the archive and the
+# comparison would be measuring tar's sanitisation. ociv's handling of
+# those names is checked against the listing instead, where tar reports
+# them unchanged.
+for img in single multi multigz longgnu longpax dup xattr opq samelayer; do
+	rm -rf "$W/ex.$img"; mkdir -p "$W/ex.$img"
+	# tar creates intermediate directories no member names: the dup
+	# archive's only member is ./etc/dup and extracting it leaves an
+	# "etc" directory behind. ociv reports what the image contains, not
+	# what unpacking it would create, so the extracted tree is filtered
+	# down to the paths GNU tar says the archives actually name.
+	python3 ./t/tarfacts.py names $(layers_of "$img") > "$W/named.$img"
+	./t/extract.sh "$W/ex.$img" $(layers_of "$img") | extractfs \
+		| awk -v NF2="$W/named.$img" '
+		    BEGIN { while ((getline l < NF2) > 0) seen[l] = 1 }
+		    $2 == "d" && !($7 in seen) { next }
+		    { print }' > "$W/ex.$img.facts"
+	"$OCIV" tree "$IMG/$img" | ocivfs > "$W/tr.$img.facts"
+	n=$(wc -l < "$W/ex.$img.facts")
+	if [ "$n" -lt 1 ]; then
+		bad "$img: GNU tar extracted nothing, the comparison would be vacuous"
+		continue
+	fi
+	diffeq "$img merged tree ($n paths): ociv vs GNU tar extracting the layers" \
+		"$W/ex.$img.facts" "$W/tr.$img.facts"
+done
+# The filter above is not free: assert that it is doing something, and
+# that what it drops is exactly the implicit parent directory.
+impl=$(./t/extract.sh "$W/ex.dup" $(layers_of dup) | extractfs | wc -l)
+kept=$(wc -l < "$W/ex.dup.facts")
+eq "GNU tar invented one directory extracting dup that the archive does not name" "1" "$((impl-kept))"
+
+# The hard link really is a hard link on disk, which is the fact that
+# makes resolving it the right answer: a hardlink member carries size 0
+# and no content, and tar gives the path the target's bytes.
+nl=$(./t/extract.sh "$W/ex.multi" $(layers_of multi) | awk '$8=="'"$(printf 'usr/bin/app2' | od -An -tx1 | tr -d ' \n')"'" {print $5}')
+eq "GNU tar made usr/bin/app2 a hard link (nlink)" "2" "$nl"
+hl=$("$OCIV" tree "$IMG/multi" | awk '/phex='"$(printf 'usr/bin/app2' | od -An -tx1 | tr -d ' \n')"'$/ {print $6}')
+eq "ociv reports the hard link with the target's size, not the header's 0" "32" "$hl"
+
+echo
 echo "--- the three whiteout rules, stated as facts about named paths ---"
 # These are the rules implementations get wrong, each asserted against a
 # path that exists for the purpose. The Python comparison above covers

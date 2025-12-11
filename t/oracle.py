@@ -76,6 +76,7 @@ class Node:
     __slots__ = ("layer", "index", "type", "mode", "uid", "gid", "size",
                  "link", "xattrs", "content")
 
+
     def __init__(self, layer, index, m, content):
         self.layer = layer
         self.index = index
@@ -137,6 +138,7 @@ def merge(layers):
     deleted = []    # (path, layer_still_holding_it, whiteout_layer, node)
     shadowed = []   # (path, old_layer, new_layer, old_node, new_node)
     nowhere = []    # whiteouts that removed nothing
+    dangling = []   # hard links whose target is in no layer at or below
     all_entries = []
 
     for i, lp in enumerate(layers):
@@ -171,12 +173,24 @@ def merge(layers):
             if path == "":
                 continue            # the root entry itself
             node = Node(i, n, m, content)
+            # A hard link's header carries size 0 and no content: the
+            # bytes are at the target. Resolve against the state as it
+            # stands, which is the lower layers plus this layer's earlier
+            # entries -- what an unpacker has when it reaches this member.
+            if node.type == "hardlink":
+                t, _e, _w = clean(m.linkname)
+                tgt = state.get(t)
+                if tgt is not None:
+                    node.size = tgt.size
+                    node.content = tgt.content
+                else:
+                    dangling.append(node)
             old = state.get(path)
             if old is not None and (old.layer != i or old.index != n):
                 if old.content != node.content or old.mode != node.mode:
                     shadowed.append((path, old.layer, i, old, node))
             state[path] = node
-    return state, deleted, shadowed, nowhere, all_entries
+    return state, deleted, shadowed, nowhere, all_entries, dangling
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +200,7 @@ def hx(s):
 
 
 def cmd_tree(layers):
-    state, _, _, _, _ = merge(layers)
+    state, _, _, _, _, _ = merge(layers)
     for p in sorted(state, key=lambda s: s.encode("utf-8", "surrogateescape")):
         n = state[p]
         print("node %s %04o %d %d %d layer=%d content=%s link=%s phex=%s" %
@@ -199,7 +213,7 @@ def is_cap(name):
 
 
 def cmd_audit(layers):
-    state, deleted, shadowed, nowhere, all_entries = merge(layers)
+    state, deleted, shadowed, nowhere, all_entries, dangling = merge(layers)
     out = []
     for i, entries in enumerate(all_entries):
         for n, m, content in entries:
@@ -250,13 +264,13 @@ def cmd_audit(layers):
 
 
 def cmd_census(layers):
-    state, deleted, shadowed, nowhere, all_entries = merge(layers)
+    state, deleted, shadowed, nowhere, all_entries, dangling = merge(layers)
     c = {k: 0 for k in (
         "layers", "entries", "whiteout-file", "whiteout-opaque", "hardlink",
         "symlink", "chardev", "dir", "file", "setuid", "setgid", "sticky",
         "world-writable", "xattr", "capability", "escape", "longname",
         "dup-in-layer", "path-in-many-layers", "deleted", "shadowed",
-        "whiteout-hit-nothing", "merged-paths")}
+        "whiteout-hit-nothing", "merged-paths", "hardlink-dangling")}
     c["layers"] = len(all_entries)
     seen_layers = {}
     for i, entries in enumerate(all_entries):
@@ -299,6 +313,7 @@ def cmd_census(layers):
     c["shadowed"] = len(shadowed)
     c["whiteout-hit-nothing"] = len(nowhere)
     c["merged-paths"] = len(state)
+    c["hardlink-dangling"] = len(dangling)
     for k in sorted(c):
         print("%s %d" % (k, c[k]))
 

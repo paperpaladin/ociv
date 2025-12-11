@@ -5,6 +5,7 @@ sources, in one format, so they can be compared line for line.
     tarfacts.py gnu  FILE.tar     parse GNU tar's own -tv listing
     tarfacts.py py   FILE.tar     read it with python's tarfile module
     tarfacts.py ociv FILE         re-normalise ociv's "entry" lines from stdin
+    tarfacts.py names FILE...     the normalised paths the archives NAME
 
 Format, one line per entry, fields separated by single spaces:
 
@@ -206,6 +207,25 @@ def emit(rows, strip=False, sanlinks=False):
               (t, mode, uid, gid, size, name.hex(), link.hex()))
 
 
+def names(paths):
+    """The set of paths the archives actually NAME, normalised, one hex
+    per line. Needed because tar creates intermediate directories that no
+    member mentions: extracting an archive whose only member is
+    "./etc/dup" leaves an "etc" directory behind, and ociv reports what
+    the image contains rather than what unpacking it would create."""
+    out = set()
+    for p in paths:
+        for row in from_gnu(p):
+            n = row[5]
+            if n.startswith(b"./"):
+                n = n[2:]
+            n = n.rstrip(b"/")
+            if n:
+                out.add(n.hex())
+    for h in sorted(out):
+        print(h)
+
+
 def main(argv):
     if len(argv) < 3:
         sys.exit(__doc__)
@@ -213,6 +233,9 @@ def main(argv):
     sanlinks = "--sanitise-links" in argv
     argv = [a for a in argv if a not in ("--strip", "--sanitise-links")]
     mode, path = argv[1], argv[2]
+    if mode == "names":
+        names(argv[2:])
+        return
     if mode == "gnu":
         emit(from_gnu(path), strip, sanlinks)
     elif mode == "py":

@@ -149,7 +149,7 @@ func cmdStats(im *Image) int {
 		"setuid", "setgid", "sticky", "world-writable", "xattr",
 		"capability", "escape", "longname", "dup-in-layer",
 		"path-in-many-layers", "deleted", "shadowed",
-		"whiteout-hit-nothing", "merged-paths"} {
+		"whiteout-hit-nothing", "merged-paths", "hardlink-dangling"} {
 		c[k] = 0
 	}
 	c["layers"] = len(m.Entries)
@@ -213,6 +213,7 @@ func cmdStats(im *Image) int {
 	c["shadowed"] = len(m.Shadowed)
 	c["whiteout-hit-nothing"] = len(m.NoTarget)
 	c["merged-paths"] = len(m.State)
+	c["hardlink-dangling"] = len(m.DanglingLinks)
 	keys := make([]string, 0, len(c))
 	for k := range c {
 		keys = append(keys, k)

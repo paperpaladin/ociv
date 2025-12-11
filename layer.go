@@ -40,6 +40,12 @@ type Entry struct {
 
 	// Content digest, filled in only where the content was read.
 	ContentSHA string
+
+	// Set by the merge for a hard link whose target it could resolve.
+	// Size and ContentSHA are then the target's, which is what the
+	// path actually holds once the layer is unpacked.
+	LinkResolved bool
+	LinkTo       string
 }
 
 // Normalised type names, so the report does not print a raw byte. GNU tar's

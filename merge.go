@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"sort"
 	"strings"
 )
@@ -48,8 +49,13 @@ type Merged struct {
 	// whiteout hits nothing would pass a whiteout test while proving the
 	// opposite of what it claims.
 	NoTarget []Removal
-	Entries  [][]Entry
-	DiffIDs  []string
+	// Hard links whose target is in no layer at or below this one.
+	// Not an error here: the format allows a layer to link to a path
+	// an earlier layer provided, and if no layer did, the image is
+	// broken in a way worth counting rather than guessing about.
+	DanglingLinks []Entry
+	Entries       [][]Entry
+	DiffIDs       []string
 }
 
 // descendants returns every path strictly below d. The slash in the prefix
@@ -129,6 +135,26 @@ func (im *Image) Merge(wantContent bool) (*Merged, error) {
 		for _, e := range ents {
 			if e.Whiteout != "" || e.Path == "" {
 				continue
+			}
+			// A hard link entry carries size 0 and no content of
+			// its own: the bytes live at the target. A reader that
+			// believes the header reports every hardlinked binary
+			// in the image as an empty file, and the merged tree
+			// then disagrees with what tar actually extracts.
+			// The target is resolved against the state as it
+			// stands, which is the lower layers plus this layer's
+			// earlier entries -- the same thing an unpacker has
+			// available when it reaches this member.
+			if e.Type == tar.TypeLink {
+				t, _, _ := cleanPath(e.Linkname)
+				if tgt, ok := m.State[t]; ok {
+					e.Size = tgt.Size
+					e.ContentSHA = tgt.ContentSHA
+					e.LinkResolved = true
+					e.LinkTo = t
+				} else {
+					m.DanglingLinks = append(m.DanglingLinks, e)
+				}
 			}
 			if old, ok := m.State[e.Path]; ok {
 				if old.ContentSHA != e.ContentSHA || old.Mode != e.Mode {
