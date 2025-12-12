@@ -54,8 +54,114 @@ type Merged struct {
 	// an earlier layer provided, and if no layer did, the image is
 	// broken in a way worth counting rather than guessing about.
 	DanglingLinks []Entry
-	Entries       [][]Entry
-	DiffIDs       []string
+	// Entries whose path was redirected by a symlinked ancestor, and
+	// those whose redirection left the root entirely.
+	Redirects []SymRedirect
+	Entries   [][]Entry
+	DiffIDs   []string
+}
+
+// resolveParents follows symlinks that appear as ANCESTORS of a path,
+// the way an unpacker writing to a real filesystem does.
+//
+// This is not pedantry. GNU tar extracting a member called ./bin/newfile
+// into a tree where bin is already a symlink to usr/bin writes
+// usr/bin/newfile: verified here, it is what tar does. So a layer can put
+// a file somewhere other than where its name says, as long as an earlier
+// layer left a symlink in the way. That is the shape of several real
+// container escapes, and a reader that treats member names as literal
+// paths reports the wrong tree and misses the finding.
+//
+// Two cases, and they are not the same.
+//
+// A RELATIVE target is resolved against the symlink's own directory, and
+// GNU tar's extraction is the oracle: the suite compares the merged tree
+// against what tar actually produced.
+//
+// An ABSOLUTE target is resolved against the IMAGE root, because that is
+// what it means once the image is a container's filesystem. GNU tar,
+// extracting into an ordinary directory, resolves it against the HOST
+// root instead and tries to write there; that is the divergence, it is
+// the reason the symescape image is excluded from the extraction
+// comparison, and it is written down in the README rather than smoothed
+// over. ociv models the container, not the unpacking directory.
+//
+// A target that climbs above the root with ".." escapes, and the entry is
+// reported and left out of the tree: it is not part of this image's root
+// filesystem, it is an attempt to write outside it.
+func resolveParents(state map[string]Entry, p string) (resolved string, viaSymlink, viaAbsolute, escapes bool) {
+	parts := strings.Split(p, "/")
+	if len(parts) == 0 {
+		return p, false, false, false
+	}
+	cur := ""
+	for _, c := range parts[:len(parts)-1] {
+		if cur == "" {
+			cur = c
+		} else {
+			cur = cur + "/" + c
+		}
+		// A chain of symlinks is legal. The bound is arbitrary and
+		// generous; Linux uses 40 for the same reason, which is that
+		// a loop otherwise never terminates.
+		for hops := 0; hops < 40; hops++ {
+			e, ok := state[cur]
+			if !ok || e.Type != tarTypeSymlink {
+				break
+			}
+			viaSymlink = true
+			t := e.Linkname
+			var base string
+			if strings.HasPrefix(t, "/") {
+				viaAbsolute = true
+				base = ""
+				// The leading slash comes off HERE rather than in
+				// cleanPath, because cleanPath's escapes flag means
+				// two things at once: "absolute" and "above the
+				// root". For a MEMBER NAME both are escapes. For a
+				// SYMLINK TARGET inside an image, absolute means
+				// "the image root", which is not an escape at all,
+				// and only ".." climbing past the root is. Leaving
+				// the slash on reported /etc as an escape and lost
+				// the finding that matters, which is that the entry
+				// lands in the image's own etc.
+				t = strings.TrimLeft(t, "/")
+			} else {
+				if i := strings.LastIndex(cur, "/"); i >= 0 {
+					base = cur[:i]
+				}
+			}
+			joined := t
+			if base != "" {
+				joined = base + "/" + t
+			}
+			next, esc, _ := cleanPath(joined)
+			if esc {
+				return "", viaSymlink, viaAbsolute, true
+			}
+			if next == cur {
+				break
+			}
+			cur = next
+		}
+	}
+	last := parts[len(parts)-1]
+	if cur == "" {
+		return last, viaSymlink, viaAbsolute, false
+	}
+	return cur + "/" + last, viaSymlink, viaAbsolute, false
+}
+
+const tarTypeSymlink = tar.TypeSymlink
+
+// SymRedirect records an entry whose path went somewhere other than where
+// its name said, because an ancestor was a symlink.
+type SymRedirect struct {
+	Layer    int
+	Literal  string
+	Resolved string
+	Absolute bool
+	Escaped  bool
 }
 
 // descendants returns every path strictly below d. The slash in the prefix
@@ -97,7 +203,20 @@ func (im *Image) Merge(wantContent bool) (*Merged, error) {
 		m.DiffIDs = append(m.DiffIDs, diff)
 
 		// Pass one: whiteouts, against the lower layers only.
+		// The target goes through the same symlink resolution as any
+		// other path: an unpacker deleting bin/foo where bin is a
+		// symlink deletes usr/bin/foo.
 		for _, e := range ents {
+			if e.Whiteout == "" {
+				continue
+			}
+			target, _, _, tesc := resolveParents(m.State, e.WhTarget)
+			if tesc {
+				m.Redirects = append(m.Redirects, SymRedirect{
+					Layer: i, Literal: e.WhTarget, Escaped: true})
+				continue
+			}
+			e.WhTarget = target
 			switch e.Whiteout {
 			case "opaque":
 				victims := descendants(m.State, e.WhTarget)
@@ -136,6 +255,18 @@ func (im *Image) Merge(wantContent bool) (*Merged, error) {
 			if e.Whiteout != "" || e.Path == "" {
 				continue
 			}
+			// Where the entry actually lands, which is not where
+			// its name says when an ancestor is a symlink.
+			res, via, abs, esc := resolveParents(m.State, e.Path)
+			if via || esc {
+				m.Redirects = append(m.Redirects, SymRedirect{
+					Layer: i, Literal: e.Path, Resolved: res,
+					Absolute: abs, Escaped: esc})
+			}
+			if esc {
+				continue
+			}
+			e.Path = res
 			// A hard link entry carries size 0 and no content of
 			// its own: the bytes live at the target. A reader that
 			// believes the header reports every hardlinked binary

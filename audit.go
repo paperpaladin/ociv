@@ -83,6 +83,24 @@ func auditLines(m *Merged) []string {
 		add("deleted layer=%d by=%d size=%d content=%s phex=%s",
 			r.Held, r.By, r.E.Size, r.E.ContentSHA, hx(r.Path))
 	}
+	// A path that did not land where its name said. Three different
+	// statements, because they call for three different reactions: a
+	// relative redirect is normal in images that symlink /bin to
+	// /usr/bin, an absolute one means the symlink target is read as the
+	// image root by a runtime and as the HOST root by tar, and an
+	// escape is an attempt to write outside the image altogether.
+	for _, r := range m.Redirects {
+		switch {
+		case r.Escaped:
+			add("symlink-escape layer=%d phex=%s", r.Layer, hx(r.Literal))
+		case r.Absolute:
+			add("symlink-parent-absolute layer=%d to=%s phex=%s",
+				r.Layer, hx(r.Resolved), hx(r.Literal))
+		default:
+			add("symlink-parent layer=%d to=%s phex=%s",
+				r.Layer, hx(r.Resolved), hx(r.Literal))
+		}
+	}
 	for _, s := range m.Shadowed {
 		if typeName(s.Old.Type) != "file" {
 			continue
@@ -149,7 +167,8 @@ func cmdStats(im *Image) int {
 		"setuid", "setgid", "sticky", "world-writable", "xattr",
 		"capability", "escape", "longname", "dup-in-layer",
 		"path-in-many-layers", "deleted", "shadowed",
-		"whiteout-hit-nothing", "merged-paths", "hardlink-dangling"} {
+		"whiteout-hit-nothing", "merged-paths", "hardlink-dangling",
+		"symlink-parent", "symlink-escape"} {
 		c[k] = 0
 	}
 	c["layers"] = len(m.Entries)
@@ -214,6 +233,13 @@ func cmdStats(im *Image) int {
 	c["whiteout-hit-nothing"] = len(m.NoTarget)
 	c["merged-paths"] = len(m.State)
 	c["hardlink-dangling"] = len(m.DanglingLinks)
+	for _, r := range m.Redirects {
+		if r.Escaped {
+			c["symlink-escape"]++
+		} else {
+			c["symlink-parent"]++
+		}
+	}
 	keys := make([]string, 0, len(c))
 	for k := range c {
 		keys = append(keys, k)

@@ -2,3 +2,4 @@
 /scratch/
 t/tmp.*
 *.tmp
+t/__pycache__/

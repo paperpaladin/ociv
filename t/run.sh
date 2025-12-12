@@ -105,9 +105,11 @@ layers_of() {
 	escape)  echo "$L/escape.tar" ;;
 	opq)     echo "$L/opqbase.tar $L/opqmark.tar" ;;
 	samelayer) echo "$L/whbase.tar $L/whsame.tar" ;;
+	symparent) echo "$L/symbase.tar $L/symwrite.tar" ;;
+	symescape) echo "$L/symescbase.tar $L/symescwrite.tar" ;;
 	esac
 }
-GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer"
+GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symescape"
 
 # The census, from the Python reader, summed over every image. Printed
 # because a reader has to be able to see that the corpus contains what the
@@ -151,6 +153,8 @@ floor dup-in-layer 1
 floor path-in-many-layers 5
 floor deleted 7
 floor shadowed 3
+floor symlink-parent 3
+floor symlink-escape 1
 
 echo
 echo "--- oracle: skopeo and sha256sum agree on the manifest digest ---"
@@ -296,6 +300,15 @@ extractfs() {  # extract.sh -> the same, with nlink dropped
 # comparison would be measuring tar's sanitisation. ociv's handling of
 # those names is checked against the listing instead, where tar reports
 # them unchanged.
+#
+# symparent and symescape are excluded too, for a reason that belongs to
+# extract.sh rather than to tar: it unpacks each layer into a FRESH
+# staging directory and copies the result over, which is what makes "this
+# layer's own whiteouts" distinguishable from "what is below". A layer
+# written into an empty stage cannot meet a symlink an earlier layer left
+# behind, so the redirection this corpus exists to test never happens
+# there. They get their own comparison below, against tar extracting the
+# layers one after another into one directory.
 for img in single multi multigz longgnu longpax dup xattr opq samelayer; do
 	rm -rf "$W/ex.$img"; mkdir -p "$W/ex.$img"
 	# tar creates intermediate directories no member names: the dup
@@ -363,6 +376,24 @@ hasnt "but does remove the same name from a lower layer"       samelayer etc/gon
 newsha="sha256:$(printf 'the new version\n' | sha256sum | cut -d" " -f1)"
 gotsha=$("$OCIV" tree "$IMG/samelayer" | awk -v h="$(printf 'etc/keepme' | od -An -tx1 | tr -d " \n")" '$0 ~ ("phex=" h "$") {for(i=1;i<=NF;i++) if ($i ~ /^content=/) print substr($i,9)}')
 eq "the survivor is this layer's version of the file" "$newsha" "$gotsha"
+
+echo
+echo "--- writing through a symlink an earlier layer left in the way ---"
+# These name the specific paths, so a failure says which rule broke
+# rather than that two listings differ. The external authority for the
+# relative case is the sequential tar extraction further down; what is
+# here is the per-path statement of the same facts.
+hasnt "a file written through a symlink is not at its literal path" symparent bin/newfile
+has   "it is where the symlink points"                              symparent usr/bin/existing
+has   "and so is the one that went through two symlinks"            symparent usr/bin/twohops
+nred=$("$OCIV" audit "$IMG/symparent" | grep -c '^audit symlink-parent ')
+eq "symparent reports two redirected writes" "2" "$nred"
+nesc=$("$OCIV" audit "$IMG/symescape" | grep -c '^audit symlink-escape ')
+eq "symescape reports the dot-dot symlink as an escape" "1" "$nesc"
+nabs=$("$OCIV" audit "$IMG/symescape" | grep -c '^audit symlink-parent-absolute ')
+eq "symescape reports the absolute symlink separately" "1" "$nabs"
+hasnt "nothing written through the escaping symlink is in the tree" symescape up/pwned
+has   "the absolute symlink lands inside the image root"            symescape etc/passwd
 
 echo
 echo "--- gzip: the descriptor digest and the diff_id are different numbers ---"

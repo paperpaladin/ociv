@@ -27,6 +27,10 @@ outside the corpus.
     mktar.py opq-mark OUT.tar
     mktar.py wh-base  OUT.tar
     mktar.py wh-same  OUT.tar
+    mktar.py sym-base OUT.tar
+    mktar.py sym-write OUT.tar
+    mktar.py symesc-base OUT.tar
+    mktar.py symesc-write OUT.tar
 """
 import sys
 
@@ -260,7 +264,62 @@ def build_wh_same(path):
 WH_PREFIX = ".wh."
 WH_OPAQUE = ".wh..wh..opq"
 
+def build_sym_base(path):
+    """A real directory, and a symlink standing in front of it. This is
+    the /bin -> usr/bin arrangement every modern distribution image has."""
+    parts = [
+        plain_entry("./", mode=0o755, typeflag=b"5"),
+        plain_entry("./usr/", mode=0o755, typeflag=b"5"),
+        plain_entry("./usr/bin/", mode=0o755, typeflag=b"5"),
+        plain_entry("./usr/bin/existing", content=b"was here first\n", mode=0o755),
+        plain_entry("./bin", typeflag=b"2", linkname="usr/bin", mode=0o777),
+        plain_entry("./usr/lib/", mode=0o755, typeflag=b"5"),
+        plain_entry("./deep", typeflag=b"2", linkname="bin", mode=0o777),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
+def build_sym_write(path):
+    """A layer that writes THROUGH the symlink, with no directory entry of
+    its own to replace it.
+
+    GNU tar extracting ./bin/newfile into a tree where bin is already a
+    symlink to usr/bin writes usr/bin/newfile. Checked, not assumed. So a
+    layer can put a file somewhere other than where its name says. The
+    absence of a ./bin/ directory entry is the whole point: when the
+    layer carries one, tar replaces the symlink with a real directory and
+    the redirection does not happen."""
+    parts = [
+        plain_entry("./bin/newfile", content=b"written through a symlink\n"),
+        plain_entry("./deep/twohops", content=b"through two symlinks\n"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
+def build_symesc_base(path):
+    """Symlinks that leave the image: one absolute, one climbing out with
+    dot-dot. Both are legal tar members and both are what a layer-based
+    escape looks like."""
+    parts = [
+        plain_entry("./", mode=0o755, typeflag=b"5"),
+        plain_entry("./etc/", mode=0o755, typeflag=b"5"),
+        plain_entry("./abs", typeflag=b"2", linkname="/etc", mode=0o777),
+        plain_entry("./up", typeflag=b"2", linkname="../../..", mode=0o777),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
+def build_symesc_write(path):
+    parts = [
+        plain_entry("./abs/passwd", content=b"root::0:0:::\n"),
+        plain_entry("./up/pwned", content=b"outside the image\n"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
 BUILDERS = {"caps": build_caps, "escape": build_escape,
+            "sym-base": build_sym_base, "sym-write": build_sym_write,
+            "symesc-base": build_symesc_base, "symesc-write": build_symesc_write,
             "opq-base": build_opq_base, "opq-mark": build_opq_mark,
             "wh-base": build_wh_base, "wh-same": build_wh_same}
 

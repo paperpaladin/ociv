@@ -119,6 +119,48 @@ def read_layer(path, idx):
     return out
 
 
+def resolve_parents(state, p):
+    """Follow symlinks that appear as ANCESTORS of a path, the way an
+    unpacker writing to a real filesystem does. A relative target is
+    resolved against the symlink's own directory; an absolute one against
+    the image root, which is what it means inside a container. A target
+    that climbs above the root escapes, and the entry is not part of this
+    image's filesystem at all.
+
+    Returns (resolved, via_symlink, via_absolute, escapes)."""
+    parts = p.split("/")
+    cur = ""
+    via = absolute = False
+    for c in parts[:-1]:
+        cur = c if not cur else cur + "/" + c
+        for _hop in range(40):
+            e = state.get(cur)
+            if e is None or e.type != "symlink":
+                break
+            via = True
+            t = e.link
+            if t.startswith("/"):
+                absolute = True
+                base = ""
+                # The slash comes off here, not in clean(). clean()'s
+                # escape flag covers both "absolute" and "above the
+                # root", which is right for a member name and wrong for
+                # a symlink target: an absolute target inside an image
+                # means the image root.
+                t = t.lstrip("/")
+            else:
+                base = cur.rpartition("/")[0]
+            joined = base + "/" + t if base else t
+            nxt, esc, _w = clean(joined)
+            if esc:
+                return "", via, absolute, True
+            if nxt == cur:
+                break
+            cur = nxt
+    last = parts[-1]
+    return (last if not cur else cur + "/" + last), via, absolute, False
+
+
 def descendants(state, d):
     """Every path strictly below directory d. The slash is part of the test:
     without it, whiteouting 'var/log' would also remove 'var/logrotate'."""
@@ -139,6 +181,7 @@ def merge(layers):
     shadowed = []   # (path, old_layer, new_layer, old_node, new_node)
     nowhere = []    # whiteouts that removed nothing
     dangling = []   # hard links whose target is in no layer at or below
+    redirects = []  # (layer, literal, resolved, absolute, escaped)
     all_entries = []
 
     for i, lp in enumerate(layers):
@@ -146,9 +189,16 @@ def merge(layers):
         all_entries.append(entries)
 
         # Pass one: the whiteouts of this layer, against the lower state.
+        # The target goes through the same symlink resolution as any other
+        # path.
         for n, m, _ in entries:
             path, esc, _why = clean(m.name)
             kind, target = whiteout(path)
+            if kind:
+                target, _v, _a, tesc = resolve_parents(state, target)
+                if tesc:
+                    redirects.append((i, path, "", False, True))
+                    continue
             if kind == "opaque":
                 victims = descendants(state, target)
                 if not victims:
@@ -172,6 +222,12 @@ def merge(layers):
                 continue            # markers are never in the result
             if path == "":
                 continue            # the root entry itself
+            res, via, absolute, esc = resolve_parents(state, path)
+            if via or esc:
+                redirects.append((i, path, res, absolute, esc))
+            if esc:
+                continue
+            path = res
             node = Node(i, n, m, content)
             # A hard link's header carries size 0 and no content: the
             # bytes are at the target. Resolve against the state as it
@@ -190,7 +246,7 @@ def merge(layers):
                 if old.content != node.content or old.mode != node.mode:
                     shadowed.append((path, old.layer, i, old, node))
             state[path] = node
-    return state, deleted, shadowed, nowhere, all_entries, dangling
+    return state, deleted, shadowed, nowhere, all_entries, dangling, redirects
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +256,7 @@ def hx(s):
 
 
 def cmd_tree(layers):
-    state, _, _, _, _, _ = merge(layers)
+    state, _, _, _, _, _, _ = merge(layers)
     for p in sorted(state, key=lambda s: s.encode("utf-8", "surrogateescape")):
         n = state[p]
         print("node %s %04o %d %d %d layer=%d content=%s link=%s phex=%s" %
@@ -213,7 +269,7 @@ def is_cap(name):
 
 
 def cmd_audit(layers):
-    state, deleted, shadowed, nowhere, all_entries, dangling = merge(layers)
+    state, deleted, shadowed, nowhere, all_entries, dangling, redirects = merge(layers)
     out = []
     for i, entries in enumerate(all_entries):
         for n, m, content in entries:
@@ -254,6 +310,15 @@ def cmd_audit(layers):
             continue
         out.append("audit deleted layer=%d by=%d size=%d content=%s phex=%s" %
                    (held, whl, node.size, node.content, hx(p)))
+    for lay, lit, res, absolute, esc in redirects:
+        if esc:
+            out.append("audit symlink-escape layer=%d phex=%s" % (lay, hx(lit)))
+        elif absolute:
+            out.append("audit symlink-parent-absolute layer=%d to=%s phex=%s"
+                       % (lay, hx(res), hx(lit)))
+        else:
+            out.append("audit symlink-parent layer=%d to=%s phex=%s"
+                       % (lay, hx(res), hx(lit)))
     for p, oldl, newl, old, new in shadowed:
         if old.type != "file":
             continue
@@ -264,13 +329,14 @@ def cmd_audit(layers):
 
 
 def cmd_census(layers):
-    state, deleted, shadowed, nowhere, all_entries, dangling = merge(layers)
+    state, deleted, shadowed, nowhere, all_entries, dangling, redirects = merge(layers)
     c = {k: 0 for k in (
         "layers", "entries", "whiteout-file", "whiteout-opaque", "hardlink",
         "symlink", "chardev", "dir", "file", "setuid", "setgid", "sticky",
         "world-writable", "xattr", "capability", "escape", "longname",
         "dup-in-layer", "path-in-many-layers", "deleted", "shadowed",
-        "whiteout-hit-nothing", "merged-paths", "hardlink-dangling")}
+        "whiteout-hit-nothing", "merged-paths", "hardlink-dangling",
+        "symlink-parent", "symlink-escape")}
     c["layers"] = len(all_entries)
     seen_layers = {}
     for i, entries in enumerate(all_entries):
@@ -314,6 +380,11 @@ def cmd_census(layers):
     c["whiteout-hit-nothing"] = len(nowhere)
     c["merged-paths"] = len(state)
     c["hardlink-dangling"] = len(dangling)
+    for _l, _lit, _res, _abs, esc in redirects:
+        if esc:
+            c["symlink-escape"] += 1
+        else:
+            c["symlink-parent"] += 1
     for k in sorted(c):
         print("%s %d" % (k, c[k]))
 

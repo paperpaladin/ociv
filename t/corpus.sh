@@ -206,6 +206,30 @@ python3 "$HERE/mktar.py" wh-same "$L/whsame.tar"
 python3 "$HERE/oci.py" assemble "$W/img/samelayer" "$L/whbase.tar" "$L/whsame.tar" > "$W/img/samelayer.digest"
 
 # ---------------------------------------------------------------------------
+# symparent: a layer writing through a symlink an earlier layer left in
+# place. GNU tar extracting ./bin/newfile where bin is a symlink to
+# usr/bin writes usr/bin/newfile, so the file is not where its name says.
+# The second layer carries no directory entries at all, because a ./bin/
+# entry would replace the symlink with a real directory and the
+# redirection would not happen.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" sym-base  "$L/symbase.tar"
+python3 "$HERE/mktar.py" sym-write "$L/symwrite.tar"
+python3 "$HERE/oci.py" assemble "$W/img/symparent" "$L/symbase.tar" "$L/symwrite.tar" > "$W/img/symparent.digest"
+
+# ---------------------------------------------------------------------------
+# symescape: the same trick with symlinks that leave the image, one
+# absolute and one climbing out with dot-dot. GNU tar extracting this into
+# an ordinary directory resolves the absolute target against the HOST root
+# and tries to write there, which is why this image is excluded from the
+# extraction comparison and compared only against the Python
+# implementation. See the README.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" symesc-base  "$L/symescbase.tar"
+python3 "$HERE/mktar.py" symesc-write "$L/symescwrite.tar"
+python3 "$HERE/oci.py" assemble "$W/img/symescape" "$L/symescbase.tar" "$L/symescwrite.tar" > "$W/img/symescape.digest"
+
+# ---------------------------------------------------------------------------
 # Broken images. One named defect each.
 # ---------------------------------------------------------------------------
 for defect in corrupt-layer corrupt-config corrupt-config-valid \
