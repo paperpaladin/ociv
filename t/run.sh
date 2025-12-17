@@ -386,6 +386,34 @@ echo "--- writing through a symlink an earlier layer left in the way ---"
 hasnt "a file written through a symlink is not at its literal path" symparent bin/newfile
 has   "it is where the symlink points"                              symparent usr/bin/existing
 has   "and so is the one that went through two symlinks"            symparent usr/bin/twohops
+# GNU tar doing it for real, into one directory, layer after layer. This
+# is the external authority for the relative case and the only part of
+# the suite that can see it: neither python's tarfile nor the staged
+# extraction follows a symlinked parent.
+rm -rf "$W/ex.symparent"; mkdir -p "$W/ex.symparent"
+python3 ./t/tarfacts.py names $(layers_of symparent) > "$W/named.symparent"
+./t/extract.sh --direct "$W/ex.symparent" $(layers_of symparent) | extractfs \
+	| awk -v NF2="$W/named.symparent" '
+	    BEGIN { while ((getline l < NF2) > 0) seen[l] = 1 }
+	    $2 == "d" && !($7 in seen) { next }
+	    { print }' > "$W/ex.symparent.facts"
+"$OCIV" tree "$IMG/symparent" | ocivfs > "$W/tr.symparent.facts"
+nex=$(wc -l < "$W/ex.symparent.facts")
+if [ "$nex" -lt 1 ]; then
+	bad "symparent: sequential GNU tar extraction produced nothing"
+else
+	diffeq "symparent merged tree ($nex paths): ociv vs sequential GNU tar extraction" \
+		"$W/ex.symparent.facts" "$W/tr.symparent.facts"
+fi
+# And the fact that makes the comparison above worth running at all: the
+# redirected path is present on disk and the literal one is not. Without
+# this, a tar that stopped following symlinked parents would agree with
+# an ociv that stopped resolving them, and the pair would pass.
+redir=$(awk '$7=="'"$(printf 'usr/bin/newfile' | od -An -tx1 | tr -d ' \n')"'"' "$W/ex.symparent.facts" | wc -l)
+eq "GNU tar put ./bin/newfile at usr/bin/newfile on disk" "1" "$redir"
+lit=$(awk '$7=="'"$(printf 'bin/newfile' | od -An -tx1 | tr -d ' \n')"'"' "$W/ex.symparent.facts" | wc -l)
+eq "and nothing at the literal path bin/newfile" "0" "$lit"
+
 nred=$("$OCIV" audit "$IMG/symparent" | grep -c '^audit symlink-parent ')
 eq "symparent reports two redirected writes" "2" "$nred"
 nesc=$("$OCIV" audit "$IMG/symescape" | grep -c '^audit symlink-escape ')

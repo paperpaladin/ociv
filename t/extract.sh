@@ -33,20 +33,45 @@
 #   - which of a set of hard links was the "original". The inode is shared
 #     and the distinction is gone. nlink is reported so the suite can
 #     still assert that a link was made.
+#
+# --direct drops the staging directory and unpacks every layer into the
+# one tree, one after another. That is the only way to see what tar does
+# when a layer writes through a symlink an earlier layer left in place:
+# a layer unpacked into an empty stage has no earlier symlink to meet, so
+# the staged form cannot reach the case at all. It is refused when any
+# layer carries a whiteout marker, because applying a marker to a tree
+# this layer has already been unpacked into would delete this layer's own
+# files, and a silently wrong oracle is worse than a missing one.
 set -u
-W=${1:?usage: extract.sh WORKDIR LAYER.tar...}
+DIRECT=
+if [ "${1:-}" = --direct ]; then DIRECT=1; shift; fi
+W=${1:?usage: extract.sh [--direct] WORKDIR LAYER.tar...}
 shift
 R=$W/root
 S=$W/stage
 rm -rf "$R" "$S"
 mkdir -p "$R"
 
+if [ -n "$DIRECT" ]; then
+	for layer in "$@"; do
+		if tar -tf "$layer" 2>/dev/null | grep -q '\.wh\.'; then
+			echo "extract.sh --direct: $layer carries a whiteout marker" >&2
+			exit 2
+		fi
+	done
+fi
+
 for layer in "$@"; do
-	rm -rf "$S"
-	mkdir -p "$S"
+	if [ -n "$DIRECT" ]; then
+		S=$R
+	else
+		rm -rf "$S"
+		mkdir -p "$S"
+	fi
 	# -p keeps the setuid, setgid and sticky bits, which the umask would
 	# otherwise take off and which are the whole point of the audit.
 	tar -xpf "$layer" -C "$S" 2>>"$W/extract.err" || true
+	[ -n "$DIRECT" ] && continue
 
 	# Whiteouts, against what is already in R. Markers are found in the
 	# staging tree, so they are this layer's and only this layer's.
