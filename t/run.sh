@@ -106,10 +106,11 @@ layers_of() {
 	opq)     echo "$L/opqbase.tar $L/opqmark.tar" ;;
 	samelayer) echo "$L/whbase.tar $L/whsame.tar" ;;
 	symparent) echo "$L/symbase.tar $L/symwrite.tar" ;;
+	symwh)   echo "$L/symbase.tar $L/symwh.tar" ;;
 	symescape) echo "$L/symescbase.tar $L/symescwrite.tar" ;;
 	esac
 }
-GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symescape"
+GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symwh symescape"
 
 # The census, from the Python reader, summed over every image. Printed
 # because a reader has to be able to see that the corpus contains what the
@@ -309,7 +310,7 @@ extractfs() {  # extract.sh -> the same, with nlink dropped
 # behind, so the redirection this corpus exists to test never happens
 # there. They get their own comparison below, against tar extracting the
 # layers one after another into one directory.
-for img in single multi multigz longgnu longpax dup xattr opq samelayer; do
+for img in single multi multigz longgnu longpax dup xattr opq samelayer symwh; do
 	rm -rf "$W/ex.$img"; mkdir -p "$W/ex.$img"
 	# tar creates intermediate directories no member names: the dup
 	# archive's only member is ./etc/dup and extracting it leaves an
@@ -416,6 +417,21 @@ eq "and nothing at the literal path bin/newfile" "0" "$lit"
 
 nred=$("$OCIV" audit "$IMG/symparent" | grep -c '^audit symlink-parent ')
 eq "symparent reports two redirected writes" "2" "$nred"
+
+# A whiteout marker underneath a symlinked directory. The marker is
+# bin/.wh.existing and bin is a symlink to usr/bin, so usr/bin/existing
+# is what goes. The staged extraction oracle agrees for a reason worth
+# stating: it runs rm -rf on the path the marker names, the kernel
+# resolves bin through the symlink, and the file disappears. That is the
+# filesystem's own rule, not a rule anyone here wrote.
+hasnt "a whiteout under a symlinked directory removes the resolved path" symwh usr/bin/existing
+has   "and leaves the directory the symlink points at"                   symwh usr/bin
+has   "and the ordinary file in the same layer"                          symwh usr/lib/note
+nwhd=$("$OCIV" audit "$IMG/symwh" | grep -c "^audit deleted .*phex=$(printf 'usr/bin/existing' | od -An -tx1 | tr -d ' \n')\$")
+eq "the deletion is reported at the resolved path, not the literal one" "1" "$nwhd"
+nnone=$("$OCIV" stats "$IMG/symwh" | awk '$1=="whiteout-hit-nothing" {print $2}')
+eq "and the marker is not recorded as having hit nothing" "0" "$nnone"
+
 nesc=$("$OCIV" audit "$IMG/symescape" | grep -c '^audit symlink-escape ')
 eq "symescape reports the dot-dot symlink as an escape" "1" "$nesc"
 nabs=$("$OCIV" audit "$IMG/symescape" | grep -c '^audit symlink-parent-absolute ')

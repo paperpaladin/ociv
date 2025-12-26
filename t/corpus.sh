@@ -218,6 +218,15 @@ python3 "$HERE/mktar.py" sym-write "$L/symwrite.tar"
 python3 "$HERE/oci.py" assemble "$W/img/symparent" "$L/symbase.tar" "$L/symwrite.tar" > "$W/img/symparent.digest"
 
 # ---------------------------------------------------------------------------
+# symwh: a whiteout marker under a symlinked directory. ./bin/.wh.existing
+# where bin is a symlink to usr/bin deletes usr/bin/existing, and the
+# staged extraction oracle agrees because rm -rf through a symlink is the
+# kernel resolving the path, not a rule anyone here wrote.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" sym-whiteout "$L/symwh.tar"
+python3 "$HERE/oci.py" assemble "$W/img/symwh" "$L/symbase.tar" "$L/symwh.tar" > "$W/img/symwh.digest"
+
+# ---------------------------------------------------------------------------
 # symescape: the same trick with symlinks that leave the image, one
 # absolute and one climbing out with dot-dot. GNU tar extracting this into
 # an ordinary directory resolves the absolute target against the HOST root

@@ -29,6 +29,7 @@ outside the corpus.
     mktar.py wh-same  OUT.tar
     mktar.py sym-base OUT.tar
     mktar.py sym-write OUT.tar
+    mktar.py sym-whiteout OUT.tar
     mktar.py symesc-base OUT.tar
     mktar.py symesc-write OUT.tar
 """
@@ -296,6 +297,27 @@ def build_sym_write(path):
     open(path, "wb").write(finish(parts))
 
 
+def build_sym_whiteout(path):
+    """A whiteout marker underneath a symlinked directory.
+
+    The marker is ./bin/.wh.existing and bin is a symlink to usr/bin in
+    the layer below, so what gets deleted is usr/bin/existing. A reader
+    that treats the marker's directory as a literal path deletes nothing
+    and reports nothing, and the file stays in the merged tree while an
+    unpacker removes it. That is a disagreement about what the image
+    contains, in the direction that matters least on a laptop and most
+    in a scanner.
+
+    An ordinary file beside it, so the layer is not only a marker: a
+    layer whose single member is a whiteout is a special case in several
+    readers and this is not meant to be testing that."""
+    parts = [
+        plain_entry("./bin/.wh.existing"),
+        plain_entry("./usr/lib/note", content=b"not a whiteout\n"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
 def build_symesc_base(path):
     """Symlinks that leave the image: one absolute, one climbing out with
     dot-dot. Both are legal tar members and both are what a layer-based
@@ -319,6 +341,7 @@ def build_symesc_write(path):
 
 BUILDERS = {"caps": build_caps, "escape": build_escape,
             "sym-base": build_sym_base, "sym-write": build_sym_write,
+            "sym-whiteout": build_sym_whiteout,
             "symesc-base": build_symesc_base, "symesc-write": build_symesc_write,
             "opq-base": build_opq_base, "opq-mark": build_opq_mark,
             "wh-base": build_wh_base, "wh-same": build_wh_same}
