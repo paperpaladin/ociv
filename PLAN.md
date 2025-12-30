@@ -122,52 +122,52 @@ Ranked, by how little of it we control:
 
 ### Milestone 0: the shape
 
-- [ ] Repository skeleton: go.mod, Makefile, LICENSE, .gitignore, this file
+- [x] Repository skeleton: go.mod, Makefile, LICENSE, .gitignore, this file
       why: the collection's gate runs `make`, and a repo without a PLAN.md
       is not a member of the set at all.
-- [ ] Digest parsing and verification, with the grammar from the spec
+- [x] Digest parsing and verification, with the grammar from the spec
       why: everything else is downstream of "is this digest string even
       well-formed", and the spec's grammar for the algorithm and the encoded
       portion is stricter than "contains a colon". A reader that accepts
       `sha256:ABCD` has already lost, because the same blob then has two
       spellings and the layout path will not resolve.
-- [ ] OCI image layout reader: oci-layout, index.json, blobs
+- [x] OCI image layout reader: oci-layout, index.json, blobs
       why: the layout document is short and precise, and the failure mode of
       getting it wrong is reading somebody else's blob.
-- [ ] Manifest and config parsing with spec validation, and `ociv info`
+- [x] Manifest and config parsing with spec validation, and `ociv info`
       why: the first point at which skopeo can be asked whether we agree.
 
 ### Milestone 1: the oracles, before the interesting code
 
-- [ ] Corpus builder: images with every construct, built with tar and python
+- [x] Corpus builder: images with every construct, built with tar and python
       why: a test for whiteouts written before a corpus containing whiteouts
       passes vacuously, and the corpus is the thing that takes longest to
       get right.
-- [ ] `t/run.sh` with the three-way digest comparison against skopeo and
+- [x] `t/run.sh` with the three-way digest comparison against skopeo and
       sha256sum
       why: the first external agreement. Until it exists every number in
       this repository is self-reported.
-- [ ] `ociv stats` and the vacuity floor in the harness
+- [x] `ociv stats` and the vacuity floor in the harness
       why: the harness must assert the corpus contains what the tests need
       before the tests run, and print the counts so a reader can see them.
 
 ### Milestone 2: layers, entry by entry
 
-- [ ] Tar entry reader and `ociv layers`
+- [x] Tar entry reader and `ociv layers`
       why: this is where GNU tar becomes the oracle, and the comparison is
       per entry because "the images differ" is not a finding.
-- [ ] GNU tar comparison for every entry field, including mode and linkname
+- [x] GNU tar comparison for every entry field, including mode and linkname
       why: a reader that gets the size right and the mode wrong passes any
       comparison that only counts entries, and the mode is the field the
       security half of this program depends on.
-- [ ] PAX and GNU long-name handling, checked against tar
+- [x] PAX and GNU long-name handling, checked against tar
       why: a path longer than 100 bytes is the normal case in a real image
       and the two formats encode it differently.
-- [ ] Hard link resolution within a layer
+- [x] Hard link resolution within a layer
       why: a hard link entry has size 0 and the content of its target, so a
       reader that believes the header reports an empty file for every
       hardlinked binary in the image.
-- [ ] Gzip-compressed layers, and the diff_id vs digest distinction
+- [x] Gzip-compressed layers, and the diff_id vs digest distinction
       why: the manifest's digest is over the compressed bytes and the
       config's diff_id is over the uncompressed bytes. Conflating them is
       the single most common bug in home-grown image readers, and it is
@@ -175,62 +175,100 @@ Ranked, by how little of it we control:
 
 ### Milestone 3: the merged filesystem
 
-- [ ] Whiteout application and `ociv tree`
+- [x] Whiteout application and `ociv tree`
       why: the point of the program. The rule that whiteouts apply only to
       lower layers, never to the layer they appear in, is the part that
       implementations get wrong.
-- [ ] Opaque directory handling
+- [x] Opaque directory handling
       why: `.wh..wh..opq` deletes the lower layers' contents of a directory
       while leaving the directory and the current layer's contents, which is
       three separate behaviours in one marker.
-- [ ] Directory whiteout removes the whole subtree
+- [x] Directory whiteout removes the whole subtree
       why: whiteouting a directory and leaving its children behind produces
       a tree with orphans, and nothing below the top level would notice.
-- [ ] The Python second implementation of the merge, and the comparison
+- [x] The Python second implementation of the merge, and the comparison
       why: there is no external tool on this machine that applies whiteouts,
       so the honest substitute is a second implementation against the spec
       text in another language, clearly labelled as weaker than skopeo.
-- [ ] Sequential GNU tar extraction as the oracle for the non-whiteout half
+- [x] Sequential GNU tar extraction as the oracle for the non-whiteout half
       why: for everything except whiteouts, "layer N overwrites layer N-1"
       is exactly what `tar -x` into one directory does, and that is an
       external authority rather than a second opinion.
 
 ### Milestone 4: the security report
 
-- [ ] setuid and setgid detection, per layer, with the introducing layer named
+- [x] setuid and setgid detection, per layer, with the introducing layer named
       why: "the image has a setuid binary" is not actionable; "layer 3
       introduced /usr/bin/foo with mode 4755" is.
-- [ ] Deleted-but-still-in-the-blob detection
+- [x] Deleted-but-still-in-the-blob detection
       why: this is the finding the program exists for. `RUN rm /secrets`
       does not remove the bytes from the published image, and a reader that
       only reports the merged tree cannot see it.
-- [ ] Overwritten-but-still-in-the-blob detection
+- [x] Overwritten-but-still-in-the-blob detection
       why: the same leak with a different shape. Replacing a file's contents
       in a later layer publishes both versions, and the first one is the one
       with the credential in it.
-- [ ] Extended attribute capabilities
+- [x] Extended attribute capabilities
       why: `security.capability` is setuid with better PR, and it travels in
       a PAX record that most tar listings never print.
-- [ ] World-writable paths and missing sticky bits on world-writable dirs
+- [x] World-writable paths and missing sticky bits on world-writable dirs
       why: cheap to compute, and the sticky-bit distinction is the one that
       separates a finding from noise.
-- [ ] Device nodes and path escape attempts
+- [x] Device nodes and path escape attempts
       why: a layer entry named `../../etc/shadow` is a supply-chain attack
-      on whatever unpacks it, and the only correct answer is to refuse.
+      on whatever unpacks it.
+      done: reported, not refused, and this item used to say refusing was
+      the only correct answer. It is not. The image is well-formed: every
+      digest matches and the spec does not forbid the member name. Exit 3
+      means "ociv cannot describe this image", and ociv can describe this
+      one exactly; refusing would withhold the description a reader came
+      for. The entry is reported and kept out of the merged tree.
+- [x] Symlinked parent directories, the three cases kept apart
+      why: GNU tar 1.35 extracting `./bin/newfile` into a tree where `bin`
+      is already a symlink to `usr/bin` writes `usr/bin/newfile`. Measured,
+      exit 0, symlink left alone. So a layer puts a file somewhere other
+      than where its name says whenever an earlier layer left a symlink in
+      the way, and a reader taking member names literally reports a tree
+      no unpacker produces.
+      done: a relative target resolves against the symlink's directory, an
+      absolute one against the image root, and one climbing past the root
+      is an escape that is reported and dropped. Whiteout targets go
+      through the same resolution, so `bin/.wh.existing` deletes
+      `usr/bin/existing`.
+- [x] What GNU tar does with an escaping symlinked parent, measured
+      why: the claim "tar would write outside the root" is the reason the
+      finding exists, and an unmeasured claim of that shape has been wrong
+      in this collection before.
+      done: a contained one-level fixture, extracted for real. Exit 0, no
+      diagnostic, file written outside the extraction root, symlink left
+      in place. GNU tar does not stop it and does not mention it.
 
 ### Milestone 5: the harness earns its keep
 
-- [ ] The mutation suite: deliberate defects, each expected to turn a named
+- [x] The mutation suite: deliberate defects, each expected to turn a named
       assertion red
       why: a test that has never been watched to fail is not evidence.
+- [ ] Name the blob a leaked file's bytes are still in, and where
+      why: "layer 0 still holds etc/secrets.txt" is a sentence. "the
+      bytes are at offset N of sha256:abcd..., 41 of them" is something
+      a reader can act on, and something GNU tar can be asked to confirm
+      by extracting the same member and comparing.
+- [ ] A per-layer leak summary, counted and printed
+      why: a leak buried among two hundred audit lines is a leak nobody
+      reads. The count per layer is the line that gets noticed.
+- [ ] A credential-shaped fixture for the leak, deleted by a later layer
+      why: the finding this program exists for has been tested on files
+      called "secrets.txt" containing the word secret. The shape that
+      matters is a token and a private key header, and the corpus should
+      hold one of each so the output can be looked at and believed.
 - [ ] Record the survivors, with the argument for each
       why: an honest mutation score needs its denominator and its
       exceptions written down, not rounded away.
-- [ ] Malformed-input sweep: truncation and corruption at every stride
+- [x] Malformed-input sweep: truncation and corruption at every stride
       why: an image is attacker-controlled data in any tool that reads one
       from a stranger, and the failure mode to rule out is a panic, not a
       wrong answer.
-- [ ] A refusal is checked by the oracle too
+- [x] A refusal is checked by the oracle too
       why: ociv rejecting a valid image is the failure mode a
       refusal-counting harness is blind to. Every refusal must be paired
       with skopeo's verdict on the same bytes.
@@ -239,12 +277,12 @@ Ranked, by how little of it we control:
 
 ### Milestone 6: what is left
 
-- [ ] Zstd layers
+- [x] Zstd layers
       why: `application/vnd.oci.image.layer.v1.tar+zstd` is in the spec and
       Go's standard library has no zstd. Refused with a diagnostic naming
       the media type, which is the honest answer; implementing zstd is a
       different project.
-- [ ] Non-sha256 digest algorithms
+- [x] Non-sha256 digest algorithms
       why: the spec permits sha512 and registered others. Refused by name.
 - [ ] Multi-platform index traversal
       why: a real index selects by platform, and the platform matching rules
