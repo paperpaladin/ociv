@@ -107,10 +107,11 @@ layers_of() {
 	samelayer) echo "$L/whbase.tar $L/whsame.tar" ;;
 	symparent) echo "$L/symbase.tar $L/symwrite.tar" ;;
 	symwh)   echo "$L/symbase.tar $L/symwh.tar" ;;
+	symout)  echo "$L/symoutbase.tar $L/symoutwrite.tar" ;;
 	symescape) echo "$L/symescbase.tar $L/symescwrite.tar" ;;
 	esac
 }
-GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symwh symescape"
+GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symwh symout symescape"
 
 # The census, from the Python reader, summed over every image. Printed
 # because a reader has to be able to see that the corpus contains what the
@@ -155,7 +156,7 @@ floor path-in-many-layers 5
 floor deleted 7
 floor shadowed 3
 floor symlink-parent 3
-floor symlink-escape 1
+floor symlink-escape 2
 
 echo
 echo "--- oracle: skopeo and sha256sum agree on the manifest digest ---"
@@ -431,6 +432,55 @@ nwhd=$("$OCIV" audit "$IMG/symwh" | grep -c "^audit deleted .*phex=$(printf 'usr
 eq "the deletion is reported at the resolved path, not the literal one" "1" "$nwhd"
 nnone=$("$OCIV" stats "$IMG/symwh" | awk '$1=="whiteout-hit-nothing" {print $2}')
 eq "and the marker is not recorded as having hit nothing" "0" "$nnone"
+
+
+echo
+echo "--- what GNU tar does when the symlinked parent leaves the root ---"
+# Measured, not assumed. The symout layers hold a symlink out -> .. and a
+# member ./out/escaped, which is the shape of a layer that writes outside
+# whatever directory it is unpacked into. The question a verifier has to
+# answer is whether tar stops it, and the answer is that it does not.
+#
+# Contained on purpose: one level out, inside this run's own scratch
+# directory. symescape's /etc and ../../.. are the realistic spellings
+# and are never extracted here, because doing so would have tar writing
+# at the host's /etc or at the filesystem root.
+mkdir -p "$W/box/root"
+: > "$W/box/tar.err"
+for f in $(layers_of symout); do
+	tar -xpf "$f" -C "$W/box/root" 2>>"$W/box/tar.err"
+	echo "$?" >> "$W/box/tar.rc"
+done
+nz=$(grep -cv '^0$' "$W/box/tar.rc")
+eq "GNU tar extracted the escaping layer without an error status" "0" "$nz"
+nerr=$(wc -c < "$W/box/tar.err")
+eq "and without a diagnostic"                                     "0" "$nerr"
+if [ -f "$W/box/escaped" ]; then
+	ok "GNU tar wrote the file OUTSIDE the extraction root, at box/escaped"
+else
+	bad "GNU tar did not write outside the root; the hazard this image records has changed"
+	find "$W/box" | sed 's/^/       /' | head -10
+fi
+# "is root/out/escaped absent" is NOT the way to ask this: root/out is
+# the symlink, so that path resolves to the file tar just wrote outside
+# and a -f test on it succeeds. It did, and the first version of this
+# assertion was red for that reason. The question is whether tar left
+# the symlink alone, which is a statement about root/out itself.
+if [ -L "$W/box/root/out" ]; then
+	ok "the symlink is still a symlink: tar wrote through it, not over it"
+else
+	bad "tar replaced the symlink with a directory; the redirection no longer happens"
+fi
+# What ociv does about it: reports it, and leaves it out of the tree.
+# Reporting without dropping would put a path in the merged filesystem
+# that is not in this image's filesystem at all; dropping without
+# reporting would make the image look clean.
+nout=$("$OCIV" audit "$IMG/symout" | grep -c '^audit symlink-escape ')
+eq "ociv reports one symlink-escape for the same bytes" "1" "$nout"
+hasnt "and the escaping path is not in the merged tree" symout out/escaped
+has   "while the file that stayed inside it is"         symout keep
+status "an escaping symlink is a finding, not a refusal: verify still exits 0" \
+	0 "$OCIV" verify "$IMG/symout"
 
 nesc=$("$OCIV" audit "$IMG/symescape" | grep -c '^audit symlink-escape ')
 eq "symescape reports the dot-dot symlink as an escape" "1" "$nesc"

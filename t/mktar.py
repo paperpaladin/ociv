@@ -30,6 +30,8 @@ outside the corpus.
     mktar.py sym-base OUT.tar
     mktar.py sym-write OUT.tar
     mktar.py sym-whiteout OUT.tar
+    mktar.py symout-base OUT.tar
+    mktar.py symout-write OUT.tar
     mktar.py symesc-base OUT.tar
     mktar.py symesc-write OUT.tar
 """
@@ -318,6 +320,31 @@ def build_sym_whiteout(path):
     open(path, "wb").write(finish(parts))
 
 
+def build_symout_base(path):
+    """One level out, and only one.
+
+    symesc-base escapes with an absolute /etc and a three-deep dot-dot,
+    which is the realistic shape and is also untestable against real
+    extraction: letting GNU tar loose on either would have it writing at
+    the host's /etc or at the filesystem root. This pair escapes exactly
+    one directory, so the suite can extract it for real into a scratch
+    tree and look at where the bytes landed without touching anything it
+    does not own."""
+    parts = [
+        plain_entry("./", mode=0o755, typeflag=b"5"),
+        plain_entry("./keep", content=b"inside\n"),
+        plain_entry("./out", typeflag=b"2", linkname="..", mode=0o777),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
+def build_symout_write(path):
+    parts = [
+        plain_entry("./out/escaped", content=b"one level above the root\n"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
 def build_symesc_base(path):
     """Symlinks that leave the image: one absolute, one climbing out with
     dot-dot. Both are legal tar members and both are what a layer-based
@@ -342,6 +369,8 @@ def build_symesc_write(path):
 BUILDERS = {"caps": build_caps, "escape": build_escape,
             "sym-base": build_sym_base, "sym-write": build_sym_write,
             "sym-whiteout": build_sym_whiteout,
+            "symout-base": build_symout_base,
+            "symout-write": build_symout_write,
             "symesc-base": build_symesc_base, "symesc-write": build_symesc_write,
             "opq-base": build_opq_base, "opq-mark": build_opq_mark,
             "wh-base": build_wh_base, "wh-same": build_wh_same}

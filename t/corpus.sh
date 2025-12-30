@@ -227,6 +227,16 @@ python3 "$HERE/mktar.py" sym-whiteout "$L/symwh.tar"
 python3 "$HERE/oci.py" assemble "$W/img/symwh" "$L/symbase.tar" "$L/symwh.tar" > "$W/img/symwh.digest"
 
 # ---------------------------------------------------------------------------
+# symout: the same escape, one level only, so GNU tar can be turned loose
+# on it for real. The suite extracts this pair and looks at where the
+# bytes landed; symescape's /etc and ../../.. cannot be extracted without
+# writing somewhere this machine's owner did not ask for.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" symout-base  "$L/symoutbase.tar"
+python3 "$HERE/mktar.py" symout-write "$L/symoutwrite.tar"
+python3 "$HERE/oci.py" assemble "$W/img/symout" "$L/symoutbase.tar" "$L/symoutwrite.tar" > "$W/img/symout.digest"
+
+# ---------------------------------------------------------------------------
 # symescape: the same trick with symlinks that leave the image, one
 # absolute and one climbing out with dot-dot. GNU tar extracting this into
 # an ordinary directory resolves the absolute target against the HOST root
