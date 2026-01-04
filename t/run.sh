@@ -244,6 +244,48 @@ else
 fi
 
 echo
+echo "--- where each file's bytes are: the offset, and the bytes at it ---"
+# ociv reports off=N for every member: where that member's data starts in
+# the UNCOMPRESSED layer stream. The leak report is what wants it, since
+# "layer 0 still holds etc/secrets.txt" is a sentence and "offset 1536,
+# 41 bytes" is something a reader can check with dd.
+#
+# The number rests on an assumption about somebody else's code: that
+# archive/tar hands its underlying reader exactly the bytes it consumes,
+# so a counter wrapped around that reader is sitting on the first data
+# byte when Next() returns. Two comparisons, because they fail
+# differently. python tarfile's offset_data is a second implementation of
+# the same calculation. The sha256 of size bytes read FROM that offset in
+# the archive file is the archive itself answering, and it is the one
+# that still fails when both implementations are wrong the same way.
+for img in $GOOD; do
+	i=0
+	for f in $(layers_of "$img"); do
+		python3 ./t/tarfacts.py offsets "$f" > "$W/off.$img.$i"
+		"$OCIV" layers "$IMG/$img" | awk -v L="$i" '
+			$1=="entry" && $2==L && $4=="file" {
+				o=""; c=""; n="";
+				for (j=1; j<=NF; j++) {
+					if ($j ~ /^off=/)     o = substr($j,5);
+					if ($j ~ /^content=/) c = substr($j,9);
+					if ($j ~ /^nhex=/)    n = substr($j,6); }
+				print o, $8, c, n }' > "$W/ocivoff.$img.$i"
+		diffeq "$img layer $i data offsets: ociv vs python tarfile, and the bytes at them" \
+			"$W/off.$img.$i" "$W/ocivoff.$img.$i"
+		i=$((i+1))
+	done
+done
+# Non-vacuity: a corpus of empty files would make every offset comparison
+# pass while hashing nothing. Count the file members that actually have
+# bytes.
+nby=$(cat "$W"/off.*.* | awk '$2 > 0' | wc -l)
+if [ "$nby" -ge 20 ]; then
+	ok "$nby file members with a nonzero length were read at their offset"
+else
+	bad "only $nby nonempty file members: the offset comparison is near-vacuous"
+fi
+
+echo
 echo "--- oracle: the Python second implementation of the merge ---"
 # No tool on this machine applies whiteouts, so the authority here is a
 # second implementation written from the spec text in another language.

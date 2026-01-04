@@ -6,6 +6,7 @@ sources, in one format, so they can be compared line for line.
     tarfacts.py py   FILE.tar     read it with python's tarfile module
     tarfacts.py ociv FILE         re-normalise ociv's "entry" lines from stdin
     tarfacts.py names FILE...     the normalised paths the archives NAME
+    tarfacts.py offsets FILE.tar  where each file member's DATA starts
 
 Format, one line per entry, fields separated by single spaces:
 
@@ -226,6 +227,28 @@ def names(paths):
         print(h)
 
 
+def offsets(path):
+    """Where each regular file member's data starts, and the sha256 of the
+    bytes read from that offset in the file itself rather than through
+    the tar reader.
+
+    The second half is the point. python's tarfile has an offset_data
+    attribute and comparing ociv's number against it checks one
+    implementation against another; seeking to the offset, reading size
+    bytes, and hashing them checks the number against the archive. An
+    offset that is wrong in both implementations the same way still
+    produces the wrong bytes."""
+    import hashlib
+    with tarfile.open(path, "r:*") as t:
+        members = [m for m in t.getmembers() if m.isreg()]
+    with open(path, "rb") as f:
+        for m in members:
+            f.seek(m.offset_data)
+            h = hashlib.sha256(f.read(m.size)).hexdigest()
+            print("%d %d sha256:%s %s" % (m.offset_data, m.size, h,
+                  m.name.encode("utf-8", "surrogateescape").hex()))
+
+
 def main(argv):
     if len(argv) < 3:
         sys.exit(__doc__)
@@ -235,6 +258,9 @@ def main(argv):
     mode, path = argv[1], argv[2]
     if mode == "names":
         names(argv[2:])
+        return
+    if mode == "offsets":
+        offsets(path)
         return
     if mode == "gnu":
         emit(from_gnu(path), strip, sanlinks)

@@ -201,6 +201,7 @@ func printEntry(e Entry) {
 	// The corpus contains a filename with a newline in it and another
 	// with a backslash, and two tools' ideas of how to escape those will
 	// differ in some corner. Hex has no corners.
+	extra = append(extra, fmt.Sprintf("off=%d", e.Offset))
 	extra = append(extra, "path="+q(e.Path))
 	extra = append(extra, "nhex="+hex.EncodeToString([]byte(e.Name)))
 	if e.Linkname != "" {

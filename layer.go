@@ -38,6 +38,15 @@ type Entry struct {
 	Escapes   bool   // the name leaves the root: "..", or an absolute path
 	EscapeWhy string
 
+	// Where this member's data starts in the UNCOMPRESSED layer stream,
+	// counted in bytes from the start of the tar. The point of carrying
+	// it is the leak report: a deleted file's bytes are still published,
+	// and "layer 0 still holds it" is a sentence where "offset 1536,
+	// 41 bytes" is something a reader can go and check with dd. For a
+	// gzip layer this is an offset into the decompressed stream, which
+	// is the thing the diff_id is over, not into the blob on disk.
+	Offset int64
+
 	// Content digest, filled in only where the content was read.
 	ContentSHA string
 
@@ -197,7 +206,14 @@ func (im *Image) LayerEntries(i int, wantContent bool) ([]Entry, string, error) 
 	defer closeFn()
 
 	var out []Entry
-	tr := tar.NewReader(r)
+	// archive/tar reads the underlying stream exactly, in 512-byte
+	// blocks, so after Next() returns the counter is sitting on the
+	// first byte of the member's data. That is an assumption about
+	// somebody else's implementation, so the suite checks every offset
+	// against python tarfile's offset_data and then dd's the bytes out
+	// and hashes them.
+	cr := &countReader{r: r}
+	tr := tar.NewReader(cr)
 	for n := 0; ; n++ {
 		h, err := tr.Next()
 		if err == io.EOF {
@@ -207,7 +223,7 @@ func (im *Image) LayerEntries(i int, wantContent bool) ([]Entry, string, error) 
 			return out, "", fmt.Errorf("layer %d entry %d: %w", i, n, err)
 		}
 		e := Entry{
-			Layer: i, Index: n,
+			Layer: i, Index: n, Offset: cr.n,
 			Name: h.Name, Type: h.Typeflag, Mode: h.Mode,
 			UID: h.Uid, GID: h.Gid, Uname: h.Uname, Gname: h.Gname,
 			Size: h.Size, Linkname: h.Linkname,
@@ -253,4 +269,18 @@ func (im *Image) LayerEntries(i int, wantContent bool) ([]Entry, string, error) 
 		return out, "", err
 	}
 	return out, diffID(), nil
+}
+
+// countReader counts the bytes handed to the tar reader. Nothing else
+// can answer "where in the layer is this member", because archive/tar
+// does not expose it.
+type countReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countReader) Read(p []byte) (int, error) {
+	k, err := c.r.Read(p)
+	c.n += int64(k)
+	return k, err
 }
