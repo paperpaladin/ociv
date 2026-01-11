@@ -74,7 +74,7 @@ def whiteout(path):
 
 class Node:
     __slots__ = ("layer", "index", "type", "mode", "uid", "gid", "size",
-                 "link", "xattrs", "content")
+                 "link", "xattrs", "content", "offset")
 
 
     def __init__(self, layer, index, m, content):
@@ -85,6 +85,7 @@ class Node:
         self.uid = m.uid
         self.gid = m.gid
         self.size = m.size
+        self.offset = m.offset_data
         self.link = m.linkname
         self.xattrs = {k[len("SCHILY.xattr."):]: v
                        for k, v in m.pax_headers.items()
@@ -308,8 +309,8 @@ def cmd_audit(layers):
     for p, held, whl, node in deleted:
         if node.type != "file":
             continue
-        out.append("audit deleted layer=%d by=%d size=%d content=%s phex=%s" %
-                   (held, whl, node.size, node.content, hx(p)))
+        out.append("audit deleted layer=%d by=%d size=%d off=%d content=%s phex=%s" %
+                   (held, whl, node.size, node.offset, node.content, hx(p)))
     for lay, lit, res, absolute, esc in redirects:
         if esc:
             out.append("audit symlink-escape layer=%d phex=%s" % (lay, hx(lit)))
@@ -322,8 +323,8 @@ def cmd_audit(layers):
     for p, oldl, newl, old, new in shadowed:
         if old.type != "file":
             continue
-        out.append("audit shadowed layer=%d by=%d size=%d content=%s phex=%s" %
-                   (oldl, newl, old.size, old.content, hx(p)))
+        out.append("audit shadowed layer=%d by=%d size=%d off=%d content=%s phex=%s" %
+                   (oldl, newl, old.size, old.offset, old.content, hx(p)))
     for s in sorted(out):
         print(s)
 

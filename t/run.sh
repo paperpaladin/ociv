@@ -477,6 +477,58 @@ eq "and the marker is not recorded as having hit nothing" "0" "$nnone"
 
 
 echo
+echo "--- the leak, confirmed by pulling the bytes back out of the layer ---"
+# The finding this program exists for. RUN rm /secrets removes the file
+# from the merged view and publishes it anyway, because a layer is an
+# append-only changeset and a whiteout is an instruction to the reader,
+# not an edit to the bytes below.
+#
+# Up to here that claim rests on ociv and on the Python implementation
+# agreeing, and they are both ours. This reads the reported offset and
+# length straight out of the layer archive with dd and hashes what comes
+# back. If the bytes were not there, or were somewhere else, the digest
+# would not match: no part of this goes through either reader.
+nleak=0
+for img in $GOOD; do
+	[ "$img" = multigz ] && continue   # same uncompressed layers as multi
+	set -- $(layers_of "$img")
+	"$OCIV" audit "$IMG/$img" | awk '$2=="deleted" || $2=="shadowed"' |
+	while read -r _a kind rest; do
+		lay=${rest#layer=}; lay=${lay%% *}
+		sz=$(echo "$rest"  | tr ' ' '\n' | sed -n 's/^size=//p')
+		off=$(echo "$rest" | tr ' ' '\n' | sed -n 's/^off=//p')
+		want=$(echo "$rest" | tr ' ' '\n' | sed -n 's/^content=//p')
+		ph=$(echo "$rest"  | tr ' ' '\n' | sed -n 's/^phex=//p')
+		eval "tarf=\${$((lay+1))}"
+		got="sha256:$(dd if="$tarf" bs=1 skip="$off" count="$sz" \
+			2>/dev/null | sha256sum | cut -d' ' -f1)"
+		if [ "$got" = "$want" ]; then
+			echo "OK $img $kind $ph"
+		else
+			echo "NO $img $kind $ph want=$want got=$got off=$off size=$sz"
+		fi
+	done > "$W/leak.$img"
+	n=$(grep -c '^NO ' "$W/leak.$img")
+	eq "$img: every leaked file's bytes are at the offset reported" "0" "$n"
+	[ "$n" = 0 ] || sed -n '/^NO /p' "$W/leak.$img" | sed 's/^/       /' | head -5
+	nleak=$((nleak + $(grep -c '^OK ' "$W/leak.$img")))
+done
+if [ "$nleak" -ge 10 ]; then
+	ok "$nleak leaked files were pulled back out of the layers with dd"
+else
+	bad "only $nleak leaks were confirmed against the archive bytes"
+fi
+# The whole point, said as a fact about one named path. multi's layer 1
+# writes etc/secrets.txt and layer 2 whiteouts it: the merged tree does
+# not have it and the published layer still does.
+hasnt "etc/secrets.txt is not in the merged tree"    multi etc/secrets.txt
+sec=$(printf 'etc/secrets.txt' | od -An -tx1 | tr -d ' \n')
+grep -q " $sec\$" "$W/leak.multi" || bad "etc/secrets.txt was not among the confirmed leaks"
+grep -q "^OK multi deleted $sec\$" "$W/leak.multi" \
+	&& ok "and its bytes came back out of layer 1 with dd" \
+	|| bad "etc/secrets.txt: dd did not reproduce the reported digest"
+
+echo
 echo "--- what GNU tar does when the symlinked parent leaves the root ---"
 # Measured, not assumed. The symout layers hold a symlink out -> .. and a
 # member ./out/escaped, which is the shape of a layer that writes outside

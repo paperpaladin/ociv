@@ -80,8 +80,8 @@ func auditLines(m *Merged) []string {
 		if typeName(r.E.Type) != "file" {
 			continue
 		}
-		add("deleted layer=%d by=%d size=%d content=%s phex=%s",
-			r.Held, r.By, r.E.Size, r.E.ContentSHA, hx(r.Path))
+		add("deleted layer=%d by=%d size=%d off=%d content=%s phex=%s",
+			r.Held, r.By, r.E.Size, r.E.Offset, r.E.ContentSHA, hx(r.Path))
 	}
 	// A path that did not land where its name said. Three different
 	// statements, because they call for three different reactions: a
@@ -105,8 +105,8 @@ func auditLines(m *Merged) []string {
 		if typeName(s.Old.Type) != "file" {
 			continue
 		}
-		add("shadowed layer=%d by=%d size=%d content=%s phex=%s",
-			s.OldL, s.NewL, s.Old.Size, s.Old.ContentSHA, hx(s.Path))
+		add("shadowed layer=%d by=%d size=%d off=%d content=%s phex=%s",
+			s.OldL, s.NewL, s.Old.Size, s.Old.Offset, s.Old.ContentSHA, hx(s.Path))
 	}
 	sort.Strings(out)
 	return out
