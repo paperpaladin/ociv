@@ -325,6 +325,24 @@ def cmd_audit(layers):
             continue
         out.append("audit shadowed layer=%d by=%d size=%d off=%d content=%s phex=%s" %
                    (oldl, newl, old.size, old.offset, old.content, hx(p)))
+    # One line per layer still publishing content the merged filesystem
+    # does not show. Both kinds counted: deleted is RUN rm, shadowed is a
+    # later layer writing over the path and publishing both versions.
+    per = {}
+    for p, held, whl, node in deleted:
+        if node.type != "file":
+            continue
+        d, sh, by = per.get(held, (0, 0, 0))
+        per[held] = (d + 1, sh, by + node.size)
+    for p, oldl, newl, old, new in shadowed:
+        if old.type != "file":
+            continue
+        d, sh, by = per.get(oldl, (0, 0, 0))
+        per[oldl] = (d, sh + 1, by + old.size)
+    for lay in sorted(per):
+        d, sh, by = per[lay]
+        out.append("audit leak layer=%d deleted=%d shadowed=%d bytes=%d"
+                   % (lay, d, sh, by))
     for s in sorted(out):
         print(s)
 

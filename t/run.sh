@@ -528,6 +528,26 @@ grep -q "^OK multi deleted $sec\$" "$W/leak.multi" \
 	&& ok "and its bytes came back out of layer 1 with dd" \
 	|| bad "etc/secrets.txt: dd did not reproduce the reported digest"
 
+# The loud line. One per layer that is still publishing content the
+# merged filesystem does not show, with both shapes of the leak counted
+# separately: deleted is RUN rm, shadowed is a later layer writing over
+# the path and leaving the earlier version in the blob.
+summ=$("$OCIV" audit "$IMG/multi" | grep '^audit leak ')
+eq "multi's leak summary names layer 0 with both counts" \
+	"audit leak layer=0 deleted=6 shadowed=3 bytes=170" "$summ"
+# The bytes figure is a sum, so it can be right with the parts wrong.
+# Check it against the per-finding sizes rather than against a constant
+# written here, which would be ociv checked against ociv.
+sumsz=$("$OCIV" audit "$IMG/multi" | awk '$2=="deleted" || $2=="shadowed" {
+		for (i=1;i<=NF;i++) if ($i ~ /^size=/) s += substr($i,6) } END {print s+0}')
+eq "and the byte total is the sum of the findings' sizes" "170" "$sumsz"
+nleaklines=$(for i in $GOOD; do "$OCIV" audit "$IMG/$i"; done | grep -c '^audit leak ')
+if [ "$nleaklines" -ge 5 ]; then
+	ok "$nleaklines layers across the corpus are publishing removed content"
+else
+	bad "only $nleaklines leak summary lines: the corpus barely exercises this"
+fi
+
 echo
 echo "--- what GNU tar does when the symlinked parent leaves the root ---"
 # Measured, not assumed. The symout layers hold a symlink out -> .. and a

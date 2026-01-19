@@ -108,6 +108,43 @@ func auditLines(m *Merged) []string {
 		add("shadowed layer=%d by=%d size=%d off=%d content=%s phex=%s",
 			s.OldL, s.NewL, s.Old.Size, s.Old.Offset, s.Old.ContentSHA, hx(s.Path))
 	}
+	// One line per layer that is still publishing content the merged
+	// filesystem does not show. A leak sitting among two hundred audit
+	// lines is a leak nobody reads, and the per-layer count is the thing
+	// that gets noticed: "layer 1 still publishes 3 files, 112 bytes"
+	// names a blob to go and look at.
+	//
+	// Both kinds are counted because they are the same leak with two
+	// shapes. Deleted is RUN rm; shadowed is a later layer writing over
+	// the path, which publishes both versions and leaves the earlier one
+	// -- the one with the credential still in it -- in the blob.
+	type leak struct{ files, shadow int; bytes int64 }
+	per := map[int]*leak{}
+	at := func(l int) *leak {
+		if per[l] == nil {
+			per[l] = &leak{}
+		}
+		return per[l]
+	}
+	for _, r := range m.Deleted {
+		if typeName(r.E.Type) != "file" {
+			continue
+		}
+		k := at(r.Held)
+		k.files++
+		k.bytes += r.E.Size
+	}
+	for _, s := range m.Shadowed {
+		if typeName(s.Old.Type) != "file" {
+			continue
+		}
+		k := at(s.OldL)
+		k.shadow++
+		k.bytes += s.Old.Size
+	}
+	for l, k := range per {
+		add("leak layer=%d deleted=%d shadowed=%d bytes=%d", l, k.files, k.shadow, k.bytes)
+	}
 	sort.Strings(out)
 	return out
 }
