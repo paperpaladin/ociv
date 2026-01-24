@@ -40,7 +40,14 @@ rm -rf "$R/m0"; mkdir -p "$R/m0/etc" "$R/m0/usr/bin" "$R/m0/usr/lib" \
 	"$R/m0/var/log" "$R/m0/opt/data" "$R/m0/home/user/.ssh"
 printf 'root:x:0:0:root:/root:/bin/sh\n' > "$R/m0/etc/passwd"
 printf 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY\n' > "$R/m0/etc/secrets.txt"
-printf 'verbose=0\n' > "$R/m0/etc/config.ini"
+# The token goes in the layer that gets OVERWRITTEN, not the one that
+# survives. That is the shape of the real mistake: a credential committed
+# into a config file, noticed, and replaced in a later build step. The
+# merged image is clean and the published layer still has it, which is
+# exactly the finding a reader of the merged tree alone cannot make. The
+# body is all zeros so that it is provably not a credential; the
+# collection's audit exempts that shape by content and nothing else.
+printf 'verbose=0\ntoken=ghp_0000000000000000000000000000000000\n' > "$R/m0/etc/config.ini"
 printf '\177ELF\002\001\001 placeholder application\n' > "$R/m0/usr/bin/app"
 printf '\177ELF\002\001\001 placeholder library\n' > "$R/m0/usr/lib/libx.so"
 printf 'boot ok\n' > "$R/m0/var/log/app.log"
@@ -64,7 +71,7 @@ printf '#!/bin/sh\necho tool\n' > "$R/m1/usr/sbin/tool"
 printf '\177ELF\002\001\001 placeholder application\n' > "$R/m1/usr/bin/app"
 ln "$R/m1/usr/bin/app" "$R/m1/usr/bin/app2"
 ln -s usr/bin "$R/m1/bin"
-printf 'verbose=1\ntoken=ghp_0000000000000000000000000000000000\n' > "$R/m1/etc/config.ini"
+printf 'verbose=1\n' > "$R/m1/etc/config.ini"
 chmod 4755 "$R/m1/usr/bin/helper"
 chmod 2755 "$R/m1/usr/sbin/tool"
 # uid 1000 and gid 100, not 1000 and 1000. Every other layer here is 0:0,

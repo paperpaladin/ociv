@@ -534,18 +534,90 @@ grep -q "^OK multi deleted $sec\$" "$W/leak.multi" \
 # the path and leaving the earlier version in the blob.
 summ=$("$OCIV" audit "$IMG/multi" | grep '^audit leak ')
 eq "multi's leak summary names layer 0 with both counts" \
-	"audit leak layer=0 deleted=6 shadowed=3 bytes=170" "$summ"
+	"audit leak layer=0 deleted=6 shadowed=3 bytes=215" "$summ"
 # The bytes figure is a sum, so it can be right with the parts wrong.
 # Check it against the per-finding sizes rather than against a constant
 # written here, which would be ociv checked against ociv.
 sumsz=$("$OCIV" audit "$IMG/multi" | awk '$2=="deleted" || $2=="shadowed" {
 		for (i=1;i<=NF;i++) if ($i ~ /^size=/) s += substr($i,6) } END {print s+0}')
-eq "and the byte total is the sum of the findings' sizes" "170" "$sumsz"
+eq "and the byte total is the sum of the findings' sizes" "215" "$sumsz"
 nleaklines=$(for i in $GOOD; do "$OCIV" audit "$IMG/$i"; done | grep -c '^audit leak ')
 if [ "$nleaklines" -ge 5 ]; then
 	ok "$nleaklines layers across the corpus are publishing removed content"
 else
 	bad "only $nleaklines leak summary lines: the corpus barely exercises this"
+fi
+
+# The leak shown as the thing it is. multi's layer 1 replaces
+# etc/config.ini, and layer 0's version carries a token. Pull layer 0's
+# bytes out at the reported offset and look at them: the token is in
+# the published image, under a path whose current contents do not have
+# it. A digest comparison says the bytes are there; this says what they
+# are, which is the sentence a reader needs.
+set -- $(layers_of multi)
+cfg=$(printf 'etc/config.ini' | od -An -tx1 | tr -d ' \n')
+line=$("$OCIV" audit "$IMG/multi" | grep "^audit shadowed .*phex=$cfg\$")
+coff=$(echo "$line" | tr ' ' '\n' | sed -n 's/^off=//p')
+csz=$(echo "$line"  | tr ' ' '\n' | sed -n 's/^size=//p')
+clay=$(echo "$line" | tr ' ' '\n' | sed -n 's/^layer=//p')
+eval "ctar=\${$((clay+1))}"
+body=$(dd if="$ctar" bs=1 skip="$coff" count="$csz" 2>/dev/null)
+if echo "$body" | grep -q '^token=gh'; then
+	ok "the overwritten etc/config.ini still has its token in layer $clay's blob"
+else
+	bad "the shadowed config.ini did not come back with a token in it"
+	echo "$body" | sed 's/^/       /' | head -3
+fi
+nowtok=$("$OCIV" tree "$IMG/multi" | grep -c "phex=$cfg\$")
+eq "while the merged tree's copy of that path is layer 1's" "1" "$nowtok"
+
+# Every credential-shaped string in this repository has to be one of the
+# two shapes that cannot be a real credential: a token whose body is all
+# zeros, or a PEM header over material saying it is not a key. The
+# collection's audit asserts this across every object of every repo and
+# would catch a third shape eventually; catching it here is catching it
+# in the commit that introduced it. The pattern is deliberately a
+# superset of what a fixture here would use.
+python3 - "$PWD" <<'GUARD' > "$W/credguard" 2>&1
+import pathlib, re, subprocess, sys
+pat = re.compile(r"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}"
+                 r"|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+                 r"|xox[baprs]-[A-Za-z0-9-]{10,}")
+# Objects AND the working tree. Objects alone is the stronger scan,
+# because a secret committed and then deleted is still in the object
+# database and not in any file; the working tree alone is the only one
+# available where there is no .git, which is where t/mutate.py runs the
+# suite -- it copies the sources into a scratch directory, so the first
+# version of this guard reported zero matches there and failed the
+# non-vacuity check in every mutant run. Both, unioned, so neither
+# situation is silently scanning nothing.
+root = pathlib.Path(sys.argv[1])
+out = subprocess.run(["git", "-C", sys.argv[1], "cat-file",
+                      "--batch-all-objects", "--batch"],
+                     capture_output=True).stdout.decode("utf-8", "replace")
+for f in sorted(root.rglob("*")):
+    if f.is_file() and ".git/" not in str(f):
+        out += f.read_bytes().decode("utf-8", "replace")
+n = bad = 0
+for m in pat.finditer(out):
+    n += 1
+    body = m.group(0).split("_", 1)[-1]
+    if body and set(body) == {"0"}:
+        continue
+    if m.group(0).startswith("-----BEGIN") and "notarealkey" in out[m.end():m.end() + 40]:
+        continue
+    bad += 1
+    print("REAL-SHAPED", m.group(0)[:20])
+print("COUNT", n, "BAD", bad)
+GUARD
+cn=$(awk '$1=="COUNT" {print $2}' "$W/credguard")
+cb=$(awk '$1=="COUNT" {print $4}' "$W/credguard")
+eq "no credential-shaped string in this repo is anything but provably fake" "0" "${cb:-1}"
+[ "${cb:-1}" = 0 ] || grep REAL-SHAPED "$W/credguard" | sed 's/^/       /'
+if [ "${cn:-0}" -ge 2 ]; then
+	ok "${cn} credential-shaped strings are present, so the guard above is not vacuous"
+else
+	bad "only ${cn:-0} credential-shaped strings in the repo: the leak fixtures have gone"
 fi
 
 echo
