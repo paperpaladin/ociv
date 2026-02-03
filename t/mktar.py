@@ -30,6 +30,9 @@ outside the corpus.
     mktar.py sym-base OUT.tar
     mktar.py sym-write OUT.tar
     mktar.py sym-whiteout OUT.tar
+    mktar.py plat-amd64 OUT.tar
+    mktar.py plat-arm64 OUT.tar
+    mktar.py plat-armv7 OUT.tar
     mktar.py symout-base OUT.tar
     mktar.py symout-write OUT.tar
     mktar.py symesc-base OUT.tar
@@ -320,6 +323,22 @@ def build_sym_whiteout(path):
     open(path, "wb").write(finish(parts))
 
 
+def build_plat(arch):
+    """A one-file layer naming its own architecture, so that picking the
+    wrong manifest out of a multi-platform index is visible in the merged
+    tree rather than only in a digest."""
+    def build(path):
+        parts = [
+            plain_entry("./", mode=0o755, typeflag=b"5"),
+            plain_entry("./usr/", mode=0o755, typeflag=b"5"),
+            plain_entry("./usr/bin/", mode=0o755, typeflag=b"5"),
+            plain_entry("./usr/bin/arch", content=("%s\n" % arch).encode(),
+                        mode=0o755),
+        ]
+        open(path, "wb").write(finish(parts))
+    return build
+
+
 def build_symout_base(path):
     """One level out, and only one.
 
@@ -369,6 +388,9 @@ def build_symesc_write(path):
 BUILDERS = {"caps": build_caps, "escape": build_escape,
             "sym-base": build_sym_base, "sym-write": build_sym_write,
             "sym-whiteout": build_sym_whiteout,
+            "plat-amd64": build_plat("amd64"),
+            "plat-arm64": build_plat("arm64"),
+            "plat-armv7": build_plat("armv7"),
             "symout-base": build_symout_base,
             "symout-write": build_symout_write,
             "symesc-base": build_symesc_base, "symesc-write": build_symesc_write,

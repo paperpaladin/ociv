@@ -10,6 +10,7 @@ ociv has already agreed with.
 Standard library only.
 
     oci.py assemble    DIR [--gzip] [--mt MEDIATYPE] [--tag NAME] LAYER.tar...
+    oci.py assemble-platforms DIR OS/ARCH[/VARIANT]=LAYER.tar...
     oci.py break       SRC DST DEFECT
     oci.py digestcases SRC OUTDIR
 """
@@ -99,6 +100,59 @@ def assemble(d, layers, use_gzip=False, mediatype=None, tag="latest",
         f.write(jdump({"imageLayoutVersion": "1.0.0"}))
     print(mdesc["digest"])
     return mdesc["digest"]
+
+
+def assemble_platforms(d, specs, tag="latest"):
+    """One layout, one tag, several platforms. That is what a real
+    multi-arch image looks like: docker.io/library/alpine:3.19 is an index
+    whose entries differ only in the platform field, and a reader that
+    picks the first one verifies somebody else's architecture.
+
+    Each spec is OS/ARCH[/VARIANT]=LAYER.tar. The config's os and
+    architecture are set to match the descriptor's platform, because
+    skopeo cross-checks them and an index whose entries disagree with
+    their own configs is not the image this is meant to be testing."""
+    lo = Layout(d)
+    mdescs = []
+    for spec in specs:
+        plat, _, layer = spec.partition("=")
+        parts = plat.split("/")
+        osn, arch = parts[0], parts[1]
+        variant = parts[2] if len(parts) > 2 else ""
+        with open(layer, "rb") as f:
+            raw = f.read()
+        desc = lo.put(raw)
+        desc["mediaType"] = LAYER_TAR
+        cfg = {"architecture": arch, "os": osn,
+               "config": {"Cmd": ["/bin/sh"]},
+               "rootfs": {"type": "layers",
+                          "diff_ids": ["sha256:" + hashlib.sha256(raw).hexdigest()]},
+               "history": [{"created_by": "ociv corpus %s" % plat}]}
+        if variant:
+            cfg["variant"] = variant
+        cdesc = lo.put(jdump(cfg))
+        cdesc["mediaType"] = OCI_CONFIG
+        man = {"schemaVersion": 2, "mediaType": OCI_MANIFEST,
+               "config": cdesc, "layers": [desc]}
+        mdesc = lo.put(jdump(man))
+        mdesc["mediaType"] = OCI_MANIFEST
+        mdesc["platform"] = {"os": osn, "architecture": arch}
+        if variant:
+            mdesc["platform"]["variant"] = variant
+        # Every entry carries the SAME ref.name, which is the part that
+        # makes :TAG insufficient on its own.
+        mdesc["annotations"] = {"org.opencontainers.image.ref.name": tag}
+        mdescs.append(mdesc)
+    with open(os.path.join(d, "index.json"), "wb") as f:
+        f.write(jdump({"schemaVersion": 2, "mediaType": OCI_INDEX,
+                       "manifests": mdescs}))
+    with open(os.path.join(d, "oci-layout"), "wb") as f:
+        f.write(jdump({"imageLayoutVersion": "1.0.0"}))
+    for m in mdescs:
+        print("%s %s" % (m["platform"]["os"] + "/" + m["platform"]["architecture"]
+                         + ("/" + m["platform"]["variant"] if "variant" in m["platform"] else ""),
+                         m["digest"]))
+    return mdescs
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +412,8 @@ def main(argv):
                 layers.append(a)
             i += 1
         assemble(d, layers, use_gzip=use_gzip, mediatype=mt, tag=tag)
+    elif cmd == "assemble-platforms":
+        assemble_platforms(argv[2], argv[3:])
     elif cmd == "break":
         break_image(argv[2], argv[3], argv[4])
     elif cmd == "digestcases":

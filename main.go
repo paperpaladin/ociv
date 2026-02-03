@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 )
 
 // Exit statuses. These are three different claims and the test harness
@@ -45,6 +46,12 @@ const usage = `usage: ociv COMMAND IMAGE
 IMAGE is an OCI image layout directory or a docker-archive tar, optionally
 suffixed with :TAG or @sha256:HEX to select one manifest from an index.
 
+  --platform OS/ARCH[/VARIANT]   select by the index entry's platform field
+
+A published image is one tag over several architectures, so :TAG does not
+narrow such an index at all and --platform is the thing that does. With
+more than one candidate left, ociv refuses and lists them.
+
 exit 0 clean, 1 the image is invalid, 2 usage, 3 refused as unimplemented.
 `
 
@@ -65,6 +72,40 @@ func refuse(format string, a ...any) {
 	os.Exit(exitRefuse)
 }
 
+// wantPlatform is the --platform value, "" if none was given. A package
+// variable rather than a parameter threaded through six commands: there
+// is exactly one of it and it is read in exactly one place.
+var wantPlatform string
+
+// parsePlatform pulls --platform and its value out of the argument list
+// and returns what is left, so the existing "COMMAND IMAGE" shape is
+// untouched. --platform= with the value attached is accepted too, because
+// that is the spelling people type.
+func parsePlatform(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--platform":
+			if i+1 >= len(args) {
+				fail(exitUsage, "--platform needs a value, OS/ARCH or OS/ARCH/VARIANT")
+			}
+			i++
+			wantPlatform = args[i]
+		case strings.HasPrefix(args[i], "--platform="):
+			wantPlatform = strings.TrimPrefix(args[i], "--platform=")
+		default:
+			out = append(out, args[i])
+		}
+	}
+	if wantPlatform != "" {
+		n := len(strings.Split(wantPlatform, "/"))
+		if n < 2 || n > 3 {
+			fail(exitUsage, "--platform %q: want OS/ARCH or OS/ARCH/VARIANT", wantPlatform)
+		}
+	}
+	return out
+}
+
 func main() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -72,7 +113,7 @@ func main() {
 			os.Exit(exitPanic)
 		}
 	}()
-	args := os.Args[1:]
+	args := parsePlatform(os.Args[1:])
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(exitUsage)

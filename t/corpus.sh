@@ -256,6 +256,22 @@ python3 "$HERE/mktar.py" symesc-write "$L/symescwrite.tar"
 python3 "$HERE/oci.py" assemble "$W/img/symescape" "$L/symescbase.tar" "$L/symescwrite.tar" > "$W/img/symescape.digest"
 
 # ---------------------------------------------------------------------------
+# multiarch: one tag, three platforms. This is what every published image
+# on a registry actually looks like, and the failure it exists to catch is
+# a reader that takes index.json's first entry: that verifies somebody
+# else's architecture and says the image is fine. Each manifest's config
+# carries the matching os and architecture, because skopeo cross-checks
+# them.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" plat-amd64 "$L/plamd64.tar"
+python3 "$HERE/mktar.py" plat-arm64 "$L/plarm64.tar"
+python3 "$HERE/mktar.py" plat-armv7 "$L/plarmv7.tar"
+python3 "$HERE/oci.py" assemble-platforms "$W/img/multiarch" \
+	"linux/amd64=$L/plamd64.tar" \
+	"linux/arm64=$L/plarm64.tar" \
+	"linux/arm/v7=$L/plarmv7.tar" > "$W/img/multiarch.platforms"
+
+# ---------------------------------------------------------------------------
 # Broken images. One named defect each.
 # ---------------------------------------------------------------------------
 for defect in corrupt-layer corrupt-config corrupt-config-valid \

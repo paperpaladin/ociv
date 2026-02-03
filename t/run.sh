@@ -830,6 +830,73 @@ for img in $GOOD; do
 done
 
 echo
+echo "--- multi-platform index: one tag, three architectures ---"
+# What a published image is. The failure to rule out is a reader that
+# takes index.json's first entry: it then verifies somebody else's
+# architecture and reports the image fine.
+MA=$IMG/multiarch
+status "no selector over a 3-platform index is a refusal"       3 "$OCIV" verify "$MA"
+status "and so is :latest, which all three entries carry"       3 "$OCIV" verify "$MA:latest"
+out=$("$OCIV" verify "$MA:latest" 2>&1)
+if echo "$out" | grep -q 'matching "latest"'; then
+	ok "the refusal says the tag matched three, not that no tag was given"
+else
+	bad "the :latest refusal still claims no selector was given: $out"
+fi
+if echo "$out" | grep -q "linux/arm/v7"; then
+	ok "and it lists the platforms, which is what distinguishes them"
+else
+	bad "the refusal does not name the platforms: $out"
+fi
+# The three manifests must actually differ, or every comparison below
+# would pass against a single-manifest index.
+nd=$(awk '{print $2}' "$IMG/multiarch.platforms" | sort -u | wc -l)
+eq "the three manifest digests are distinct" "3" "$nd"
+nplat=0
+while read -r plat dg; do
+	nplat=$((nplat+1))
+	ours=$("$OCIV" info "$MA" --platform "$plat" | awk '$1=="manifest" {print $2}')
+	eq "multiarch $plat: ociv picks the manifest the corpus wrote" "$dg" "$ours"
+	# Not only the digest. Each layer holds one file naming its own
+	# architecture, so a right digest over the wrong image is visible.
+	arch=${plat#linux/}
+	arch=$(echo "$arch" | tr -d /)
+	want="sha256:$(printf '%s\n' "$arch" | sha256sum | cut -d' ' -f1)"
+	got=$("$OCIV" tree "$MA" --platform "$plat" |
+		awk '/phex='"$(printf 'usr/bin/arch' | od -An -tx1 | tr -d ' \n')"'$/ {
+			for (i=1;i<=NF;i++) if ($i ~ /^content=/) print substr($i,9) }')
+	eq "multiarch $plat: usr/bin/arch in the selected layer says $arch" "$want" "$got"
+done < "$IMG/multiarch.platforms"
+eq "all three platforms were checked" "3" "$nplat"
+status "a platform the index does not hold is invalid, not a refusal" \
+	1 "$OCIV" verify "$MA" --platform linux/riscv64
+status "a malformed --platform is a usage error" 2 "$OCIV" verify "$MA" --platform amd64
+# @DIGEST still works and still narrows to one, which is the escape hatch
+# for an index whose entries carry no platform field at all.
+dg=$(awk '$1=="linux/arm64" {print $2}' "$IMG/multiarch.platforms")
+status "selecting the same manifest by digest verifies clean" 0 "$OCIV" verify "$MA@$dg"
+
+# Where skopeo and ociv disagree, measured rather than asserted away.
+# skopeo's oci-layout transport resolves a reference by the ref.name
+# annotation and returns the FIRST entry that carries it; the platform
+# field of an entry sitting directly in index.json is not consulted. So
+# skopeo reports amd64 for all three --override-arch values here, which
+# is the "first entry wins" behaviour this image was built to catch.
+#
+# ociv follows the image-index document, which says an entry SHOULD
+# carry platform and a consumer selects on it. We are stricter, we say
+# so here and in the README, and the assertion below is on skopeo's
+# behaviour so that a change in it is a failure rather than silence.
+: > "$W/skplat"
+for a in amd64 arm64; do
+	skopeo --override-os linux --override-arch "$a" inspect "oci:$MA:latest" \
+		2>/dev/null | sed -n 's/.*"Architecture": *"\([^"]*\)".*/\1/p' >> "$W/skplat"
+done
+got=$(tr '\n' ' ' < "$W/skplat")
+eq "skopeo reads a flat multi-platform index by ref.name alone (first entry wins)" \
+	"amd64 amd64 " "$got"
+
+echo
 echo "--- malformed input: truncation and corruption at every stride ---"
 # An image is attacker-controlled data in any tool that reads one from a
 # stranger, and the failure mode to rule out here is not a wrong answer,

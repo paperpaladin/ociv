@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -539,6 +540,12 @@ func (im *Image) openLayout() error {
 func (im *Image) selectManifest() (Descriptor, error) {
 	var cands []Descriptor
 	for _, d := range im.Index.Manifests {
+		// --platform narrows first and independently of the tag,
+		// because a real multi-arch index is one tag over several
+		// platforms: the two are not alternatives, they compose.
+		if wantPlatform != "" && d.Platform.String() != wantPlatform {
+			continue
+		}
 		switch {
 		case im.Selector == "":
 			cands = append(cands, d)
@@ -553,20 +560,48 @@ func (im *Image) selectManifest() (Descriptor, error) {
 		}
 	}
 	if len(cands) == 0 {
-		return Descriptor{}, invalidf("no manifest in index.json matches %q", im.Selector)
+		what := strconv.Quote(im.Selector)
+		if wantPlatform != "" {
+			what = "platform " + wantPlatform
+			if im.Selector != "" {
+				what += " and " + strconv.Quote(im.Selector)
+			}
+		}
+		var had []string
+		for _, d := range im.Index.Manifests {
+			had = append(had, d.Platform.String())
+		}
+		sort.Strings(had)
+		return Descriptor{}, invalidf("no manifest in index.json matches %s; it holds %s",
+			what, strings.Join(had, " "))
 	}
 	if len(cands) > 1 {
+		// Two different situations and the message used to give both
+		// the same words, "no selector was given", which is a lie when
+		// one was. A real multi-arch image is one tag over several
+		// platforms, so :TAG narrows nothing there and telling the
+		// user to append a tag sends them round the same loop. Name
+		// the platforms, since that is what actually distinguishes the
+		// candidates, and fall back to the digest where there is no
+		// platform field.
 		var names []string
 		for _, d := range cands {
-			n := d.Annotations["org.opencontainers.image.ref.name"]
-			if n == "" {
+			n := d.Platform.String()
+			if n == "-" {
+				n = d.Annotations["org.opencontainers.image.ref.name"]
+			}
+			if n == "" || n == "-" {
 				n = d.dg()
 			}
 			names = append(names, n)
 		}
 		sort.Strings(names)
-		refuse("index.json has %d manifests and no selector was given; append :TAG or @DIGEST. Candidates: %s",
-			len(cands), strings.Join(names, " "))
+		if im.Selector == "" {
+			refuse("index.json has %d manifests and no selector was given; append :TAG, @DIGEST or --platform. Candidates: %s",
+				len(cands), strings.Join(names, " "))
+		}
+		refuse("index.json has %d manifests matching %q; narrow it with @DIGEST or --platform. Candidates: %s",
+			len(cands), im.Selector, strings.Join(names, " "))
 	}
 	return cands[0], nil
 }
