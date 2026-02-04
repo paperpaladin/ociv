@@ -39,6 +39,12 @@ func xattrField(x map[string]string) string {
 
 func cmdInfo(im *Image) int {
 	fmt.Printf("kind %s\n", im.Src.kind())
+	// Printed only when it happened, because a line saying "no nested
+	// index" on every single-manifest image is noise and a line that is
+	// always there says nothing by being there.
+	if im.NestedIndexDigest != "" {
+		fmt.Printf("nested-index %s\n", im.NestedIndexDigest)
+	}
 	fmt.Printf("manifest %s %d %s\n", im.ManifestDigest, len(im.ManifestRaw), im.Manifest.MediaType)
 	fmt.Printf("config %s %d %s\n", im.Manifest.Config.dg(), len(im.ConfigRaw), im.Manifest.Config.mt())
 	fmt.Printf("platform %s/%s\n", im.Config.OS, im.Config.Architecture)

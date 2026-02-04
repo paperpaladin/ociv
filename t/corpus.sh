@@ -271,6 +271,14 @@ python3 "$HERE/oci.py" assemble-platforms "$W/img/multiarch" \
 	"linux/arm64=$L/plarm64.tar" \
 	"linux/arm/v7=$L/plarmv7.tar" > "$W/img/multiarch.platforms"
 
+# nested: the same three platforms behind one index entry, which is the
+# shape a registry serves and skopeo copy --all writes. nested2 wraps it
+# once more, which the spec allows and nothing publishes, so that the
+# refusal for deeper nesting is tested against an image rather than
+# asserted about.
+python3 "$HERE/oci.py" nest "$W/img/multiarch" "$W/img/nested"  1 > "$W/img/nested.digest"
+python3 "$HERE/oci.py" nest "$W/img/multiarch" "$W/img/nested2" 2 > "$W/img/nested2.digest"
+
 # ---------------------------------------------------------------------------
 # Broken images. One named defect each.
 # ---------------------------------------------------------------------------

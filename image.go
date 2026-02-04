@@ -308,14 +308,19 @@ type Image struct {
 	Selector string // the :tag or @digest the user asked for, "" if none
 	Src      blobSource
 
-	IndexRaw       []byte
-	Index          Index
-	ManifestDesc   Descriptor
-	ManifestRaw    []byte
-	ManifestDigest string
-	Manifest       Manifest
-	ConfigRaw      []byte
-	Config         Config
+	IndexRaw     []byte
+	Index        Index
+	ManifestDesc Descriptor
+	// Set when index.json pointed at an image index rather than at an
+	// image manifest, so info can print the level that was traversed
+	// and a second nesting can be refused rather than recursed into.
+	nested            bool
+	NestedIndexDigest string
+	ManifestRaw       []byte
+	ManifestDigest    string
+	Manifest          Manifest
+	ConfigRaw         []byte
+	Config            Config
 
 	// Findings accumulated while opening. Opening does not exit: verify
 	// wants the whole list, and info wants to print what it could read.
@@ -538,12 +543,33 @@ func (im *Image) openLayout() error {
 // and more than one candidate it refuses: guessing which image the user
 // meant is how a verifier ends up verifying something else.
 func (im *Image) selectManifest() (Descriptor, error) {
+	return im.selectFrom(im.Index.Manifests, "index.json")
+}
+
+// selectFrom picks one descriptor out of a list of them. It is used for
+// index.json and again for a nested image index reached through it: the
+// rules are the same list of rules both times, and writing them twice is
+// how the second level ends up behaving differently from the first.
+func (im *Image) selectFrom(all []Descriptor, where string) (Descriptor, error) {
+	// Whether this list is one a platform can discriminate at all.
+	// index.json of a nested layout holds ONE entry, pointing at the
+	// image index, and that entry carries no platform field: applying
+	// the filter there removes the only candidate and reports the image
+	// as not holding the platform, which is what the first version of
+	// this did. The filter belongs at the level that distinguishes
+	// platforms, and this is how that level is recognised.
+	anyPlatform := false
+	for _, d := range all {
+		if d.Platform != nil {
+			anyPlatform = true
+		}
+	}
 	var cands []Descriptor
-	for _, d := range im.Index.Manifests {
+	for _, d := range all {
 		// --platform narrows first and independently of the tag,
 		// because a real multi-arch index is one tag over several
 		// platforms: the two are not alternatives, they compose.
-		if wantPlatform != "" && d.Platform.String() != wantPlatform {
+		if anyPlatform && wantPlatform != "" && d.Platform.String() != wantPlatform {
 			continue
 		}
 		switch {
@@ -568,12 +594,12 @@ func (im *Image) selectManifest() (Descriptor, error) {
 			}
 		}
 		var had []string
-		for _, d := range im.Index.Manifests {
+		for _, d := range all {
 			had = append(had, d.Platform.String())
 		}
 		sort.Strings(had)
-		return Descriptor{}, invalidf("no manifest in index.json matches %s; it holds %s",
-			what, strings.Join(had, " "))
+		return Descriptor{}, invalidf("no manifest in %s matches %s; it holds %s",
+			where, what, strings.Join(had, " "))
 	}
 	if len(cands) > 1 {
 		// Two different situations and the message used to give both
@@ -597,11 +623,11 @@ func (im *Image) selectManifest() (Descriptor, error) {
 		}
 		sort.Strings(names)
 		if im.Selector == "" {
-			refuse("index.json has %d manifests and no selector was given; append :TAG, @DIGEST or --platform. Candidates: %s",
-				len(cands), strings.Join(names, " "))
+			refuse("%s has %d manifests and no selector was given; append :TAG, @DIGEST or --platform. Candidates: %s",
+				where, len(cands), strings.Join(names, " "))
 		}
-		refuse("index.json has %d manifests matching %q; narrow it with @DIGEST or --platform. Candidates: %s",
-			len(cands), im.Selector, strings.Join(names, " "))
+		refuse("%s has %d manifests matching %q; narrow it with @DIGEST or --platform. Candidates: %s",
+			where, len(cands), im.Selector, strings.Join(names, " "))
 	}
 	return cands[0], nil
 }
@@ -614,15 +640,49 @@ func (im *Image) loadManifest() error {
 	im.ManifestRaw = b
 	im.ManifestDigest = SHA256Hex(b)
 
-	// A manifest list reached through index.json is a second level of
-	// indirection the spec allows and ociv does not follow.
+	// One level of nesting. An OCI layout written by skopeo copy --all
+	// has index.json holding a single entry that points at an image
+	// INDEX blob, and the per-platform manifests hang off that. Refusing
+	// here, which is what this used to do, means refusing every
+	// multi-arch image anyone actually publishes.
+	//
+	// It is one level and not a loop on purpose. The spec permits an
+	// index to reference an index to any depth, nobody writes that, and
+	// a reader that follows arbitrary depth needs a cycle guard for a
+	// case that has never been seen. Deeper than this is refused by
+	// name, with the depth in the message.
 	var probe struct {
 		MediaType string          `json:"mediaType"`
 		Manifests json.RawMessage `json:"manifests"`
 	}
 	_ = json.Unmarshal(b, &probe)
 	if probe.MediaType == mtOCIIndex || probe.MediaType == mtDockerList || probe.Manifests != nil {
-		refuse("%s is a manifest list or index, not an image manifest; nested indexes are not implemented", im.ManifestDigest)
+		if im.nested {
+			refuse("%s is an index inside an index; ociv follows one level of nesting and this is two",
+				im.ManifestDigest)
+		}
+		var inner Index
+		if err := json.Unmarshal(b, &inner); err != nil {
+			return invalidf("nested index %s: %w", im.ManifestDigest, err)
+		}
+		if len(inner.Manifests) == 0 {
+			return invalidf("nested index %s has no manifests", im.ManifestDigest)
+		}
+		// The tag was already spent selecting this index out of
+		// index.json, and the entries below it carry platforms rather
+		// than ref.names. Selecting on the tag again would match
+		// nothing and report the image broken.
+		outer := im.Selector
+		im.Selector = ""
+		d, err := im.selectFrom(inner.Manifests, "the nested index "+im.ManifestDigest)
+		im.Selector = outer
+		if err != nil {
+			return err
+		}
+		im.nested = true
+		im.NestedIndexDigest = im.ManifestDigest
+		im.ManifestDesc = d
+		return im.loadManifest()
 	}
 
 	if err := json.Unmarshal(b, &im.Manifest); err != nil {

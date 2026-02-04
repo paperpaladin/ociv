@@ -897,6 +897,69 @@ eq "skopeo reads a flat multi-platform index by ref.name alone (first entry wins
 	"amd64 amd64 " "$got"
 
 echo
+echo "--- nested index: the shape a registry actually serves ---"
+# index.json holding ONE entry that points at an image index, with the
+# per-platform manifests below it. That is what skopeo copy --all writes
+# and what a registry returns, and ociv refused every one of them until
+# now.
+#
+# skopeo IS the oracle here, unlike the flat case: its oci-layout
+# transport does resolve a nested index by platform. skopeo copy writes
+# the selected image manifest to dir:, and that file's digest is the
+# answer to compare against.
+NE=$IMG/nested
+status "a nested index with no selector is still a refusal" 3 "$OCIV" verify "$NE"
+nn=0
+while read -r plat dg; do
+	nn=$((nn+1))
+	arch=${plat#linux/}
+	var=""
+	case $arch in */*) var=${arch#*/}; arch=${arch%%/*} ;; esac
+	ours=$("$OCIV" info "$NE" --platform "$plat" | awk '$1=="manifest" {print $2}')
+	eq "nested $plat: ociv reaches the same manifest as the flat index" "$dg" "$ours"
+	rm -rf "$W/sknest"
+	if skopeo --override-os linux --override-arch "$arch" \
+		${var:+--override-variant "$var"} \
+		copy "oci:$NE:latest" "dir:$W/sknest" >/dev/null 2>"$W/e"; then
+		sk="sha256:$(sha256sum < "$W/sknest/manifest.json" | cut -d' ' -f1)"
+		eq "nested $plat: ociv agrees with skopeo copy --override-arch" "$dg" "$sk"
+	else
+		bad "skopeo could not copy $NE for $plat: $(tail -1 "$W/e")"
+	fi
+done < "$IMG/multiarch.platforms"
+eq "all three nested platforms were checked" "3" "$nn"
+# With the tag spelled out as well. The tag selects the index out of
+# index.json and must NOT be carried down into it: the entries there
+# have platforms and no ref.name, so a reader that keeps matching on the
+# tag finds nothing and calls a valid image broken. Without this case
+# the mutation that does exactly that survived the whole suite, because
+# every other nested assertion here omits the tag.
+dg64=$(awk '$1=="linux/arm64" {print $2}' "$IMG/multiarch.platforms")
+withtag=$("$OCIV" info "$NE:latest" --platform linux/arm64 | awk '$1=="manifest" {print $2}')
+eq "nested: :latest selects the index and does not follow it down" "$dg64" "$withtag"
+status "and verifies clean that way" 0 "$OCIV" verify "$NE:latest" --platform linux/arm64
+# info says which level it traversed, and only when it traversed one.
+ni=$("$OCIV" info "$NE" --platform linux/arm64 | grep -c '^nested-index ')
+eq "info names the index it went through" "1" "$ni"
+ni=$("$OCIV" info "$IMG/single" | grep -c '^nested-index ')
+eq "and says nothing about nesting when there was none" "0" "$ni"
+# One level, not a loop. Deeper is refused by name rather than followed.
+status "an index inside an index inside index.json is refused" \
+	3 "$OCIV" verify "$IMG/nested2" --platform linux/arm64
+out=$("$OCIV" verify "$IMG/nested2" --platform linux/arm64 2>&1)
+if echo "$out" | grep -q "one level of nesting"; then
+	ok "and the refusal says how deep it goes"
+else
+	bad "the two-level refusal does not say why: $out"
+fi
+# The tree, not only the digest: each layer names its own architecture.
+got=$("$OCIV" tree "$NE" --platform linux/arm/v7 |
+	awk '/phex='"$(printf 'usr/bin/arch' | od -An -tx1 | tr -d ' \n')"'$/ {
+		for (i=1;i<=NF;i++) if ($i ~ /^content=/) print substr($i,9) }')
+eq "nested linux/arm/v7: the layer that came out says armv7" \
+	"sha256:$(printf 'armv7\n' | sha256sum | cut -d' ' -f1)" "$got"
+
+echo
 echo "--- malformed input: truncation and corruption at every stride ---"
 # An image is attacker-controlled data in any tool that reads one from a
 # stranger, and the failure mode to rule out here is not a wrong answer,

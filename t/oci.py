@@ -11,6 +11,7 @@ Standard library only.
 
     oci.py assemble    DIR [--gzip] [--mt MEDIATYPE] [--tag NAME] LAYER.tar...
     oci.py assemble-platforms DIR OS/ARCH[/VARIANT]=LAYER.tar...
+    oci.py nest        SRC DST [DEPTH]
     oci.py break       SRC DST DEFECT
     oci.py digestcases SRC OUTDIR
 """
@@ -153,6 +154,42 @@ def assemble_platforms(d, specs, tag="latest"):
                          + ("/" + m["platform"]["variant"] if "variant" in m["platform"] else ""),
                          m["digest"]))
     return mdescs
+
+
+def nest(src, dst, depth=1):
+    """Turn a flat multi-platform layout into the nested one a registry
+    actually serves, and that skopeo copy --all writes: index.json holds
+    ONE entry pointing at an image index blob, and the per-platform
+    manifests hang off that.
+
+    depth 2 wraps it twice, which is legal and which nothing writes; it
+    is here so the refusal for depth beyond one can be tested against an
+    image rather than asserted about."""
+    shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src, dst)
+    idx = read_index(dst)
+    entries = [{k: v for k, v in m.items() if k != "annotations"}
+               for m in idx["manifests"]]
+    # Not Layout(dst): its constructor wipes the directory, which here
+    # would delete the copy that was just made. Writing a blob is three
+    # lines and the mistake cost a debugging detour.
+    def put(b):
+        h = hashlib.sha256(b).hexdigest()
+        with open(os.path.join(dst, "blobs", "sha256", h), "wb") as f:
+            f.write(b)
+        return {"digest": "sha256:" + h, "size": len(b)}
+    for level in range(depth):
+        inner = {"schemaVersion": 2, "mediaType": OCI_INDEX, "manifests": entries}
+        desc = put(jdump(inner))
+        desc["mediaType"] = OCI_INDEX
+        entries = [desc]
+    top = dict(entries[0])
+    top["annotations"] = {"org.opencontainers.image.ref.name": "latest"}
+    with open(os.path.join(dst, "index.json"), "wb") as f:
+        f.write(jdump({"schemaVersion": 2, "mediaType": OCI_INDEX,
+                       "manifests": [top]}))
+    print(top["digest"])
+    return top["digest"]
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +451,8 @@ def main(argv):
         assemble(d, layers, use_gzip=use_gzip, mediatype=mt, tag=tag)
     elif cmd == "assemble-platforms":
         assemble_platforms(argv[2], argv[3:])
+    elif cmd == "nest":
+        nest(argv[2], argv[3], int(argv[4]) if len(argv) > 4 else 1)
     elif cmd == "break":
         break_image(argv[2], argv[3], argv[4])
     elif cmd == "digestcases":
