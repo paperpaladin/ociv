@@ -105,8 +105,26 @@ func auditLines(m *Merged) []string {
 		if typeName(s.Old.Type) != "file" {
 			continue
 		}
-		add("shadowed layer=%d by=%d size=%d off=%d content=%s phex=%s",
-			s.OldL, s.NewL, s.Old.Size, s.Old.Offset, s.Old.ContentSHA, hx(s.Path))
+		// What changed, as well as that something did. "layer 1
+		// overwrote etc/config.ini" is a fact about the image;
+		// "overwrote it with different bytes" is the one that says
+		// the earlier version is a separate document still being
+		// published, and "overwrote it with the same bytes and a
+		// different mode" is a chmod, which leaks nothing new.
+		// A reader who cannot tell those apart treats every layer
+		// rebuild as a credential leak and stops reading the report.
+		delta := "none"
+		switch {
+		case s.Old.ContentSHA != s.New.ContentSHA && s.Old.Mode != s.New.Mode:
+			delta = "content+mode"
+		case s.Old.ContentSHA != s.New.ContentSHA:
+			delta = "content"
+		case s.Old.Mode != s.New.Mode:
+			delta = "mode"
+		}
+		add("shadowed layer=%d by=%d delta=%s size=%d off=%d content=%s new=%s newmode=%04o phex=%s",
+			s.OldL, s.NewL, delta, s.Old.Size, s.Old.Offset,
+			s.Old.ContentSHA, s.New.ContentSHA, s.New.Mode, hx(s.Path))
 	}
 	// One line per layer that is still publishing content the merged
 	// filesystem does not show. A leak sitting among two hundred audit

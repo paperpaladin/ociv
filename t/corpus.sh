@@ -86,6 +86,13 @@ rm -rf "$R/m2"; mkdir -p "$R/m2/etc" "$R/m2/opt/data"
 : > "$R/m2/opt/data/.wh..wh..opq"
 printf 'replaced\n' > "$R/m2/opt/data/new"
 printf 'root:x:0:0:root:/root:/bin/sh\ndaemon:x:1:1:daemon:/:/sbin/nologin\n' > "$R/m2/etc/passwd"
+# Different bytes AND a different mode on one path. Without this the
+# audit's delta field never reports content+mode and the branch that
+# produces it is never reached; the corpus had content-only and
+# mode-only and nothing that was both.
+mkdir -p "$R/m2/usr/lib"
+printf '\177ELF\002\001\001 placeholder library, rebuilt\n' > "$R/m2/usr/lib/libx.so"
+chmod 0755 "$R/m2/usr/lib/libx.so"
 mk m2 pax 0 0 "$R/m2"
 
 # L3: a directory whiteout that must take a subtree with it, a sticky

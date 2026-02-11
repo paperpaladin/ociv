@@ -532,15 +532,50 @@ grep -q "^OK multi deleted $sec\$" "$W/leak.multi" \
 # merged filesystem does not show, with both shapes of the leak counted
 # separately: deleted is RUN rm, shadowed is a later layer writing over
 # the path and leaving the earlier version in the blob.
+# What changed, not only that something did. A chmod of an unchanged
+# file leaks nothing new; different bytes mean the earlier version is a
+# separate document still being published. A report that cannot tell
+# those apart calls every layer rebuild a credential leak.
+: > "$W/deltas"
+for i in $GOOD; do
+	"$OCIV" audit "$IMG/$i" | sed -n 's/^audit shadowed .*delta=\([a-z+]*\) .*/\1/p' >> "$W/deltas"
+done
+for d in content mode content+mode; do
+	n=$(grep -cx "$d" "$W/deltas")
+	if [ "$n" -ge 1 ]; then
+		ok "the corpus produces $n shadowed findings with delta=$d"
+	else
+		bad "no shadowed finding with delta=$d: that branch is never reached"
+	fi
+done
+n=$(grep -cx none "$W/deltas")
+eq "and none that changed nothing, which would not be a finding at all" "0" "$n"
+# The claim behind delta=mode: same bytes, so there is one document and
+# not two. Checked against the archive, not against the field.
+app=$(printf 'usr/bin/app' | od -An -tx1 | tr -d ' \n')
+line=$("$OCIV" audit "$IMG/multi" | grep "^audit shadowed .*phex=$app\$")
+oldc=$(echo "$line" | tr ' ' '\n' | sed -n 's/^content=//p')
+newc=$(echo "$line" | tr ' ' '\n' | sed -n 's/^new=//p')
+eq "delta=mode means the two versions really are the same bytes" "$oldc" "$newc"
+cfgp=$(printf 'etc/config.ini' | od -An -tx1 | tr -d ' \n')
+cfgl=$("$OCIV" audit "$IMG/multi" | grep "^audit shadowed .*phex=$cfgp\$")
+oldc=$(echo "$cfgl" | tr ' ' '\n' | sed -n 's/^content=//p')
+newc=$(echo "$cfgl" | tr ' ' '\n' | sed -n 's/^new=//p')
+if [ "$oldc" != "$newc" ]; then
+	ok "and delta=content means they are not"
+else
+	bad "etc/config.ini is reported as content-changed with equal digests"
+fi
+
 summ=$("$OCIV" audit "$IMG/multi" | grep '^audit leak ')
 eq "multi's leak summary names layer 0 with both counts" \
-	"audit leak layer=0 deleted=6 shadowed=3 bytes=215" "$summ"
+	"audit leak layer=0 deleted=6 shadowed=4 bytes=243" "$summ"
 # The bytes figure is a sum, so it can be right with the parts wrong.
 # Check it against the per-finding sizes rather than against a constant
 # written here, which would be ociv checked against ociv.
 sumsz=$("$OCIV" audit "$IMG/multi" | awk '$2=="deleted" || $2=="shadowed" {
 		for (i=1;i<=NF;i++) if ($i ~ /^size=/) s += substr($i,6) } END {print s+0}')
-eq "and the byte total is the sum of the findings' sizes" "215" "$sumsz"
+eq "and the byte total is the sum of the findings' sizes" "243" "$sumsz"
 nleaklines=$(for i in $GOOD; do "$OCIV" audit "$IMG/$i"; done | grep -c '^audit leak ')
 if [ "$nleaklines" -ge 5 ]; then
 	ok "$nleaklines layers across the corpus are publishing removed content"

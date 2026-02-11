@@ -323,8 +323,21 @@ def cmd_audit(layers):
     for p, oldl, newl, old, new in shadowed:
         if old.type != "file":
             continue
-        out.append("audit shadowed layer=%d by=%d size=%d off=%d content=%s phex=%s" %
-                   (oldl, newl, old.size, old.offset, old.content, hx(p)))
+        # What changed, not only that something did. A chmod leaks
+        # nothing new; different bytes mean the earlier version is a
+        # separate document still being published.
+        if old.content != new.content and old.mode != new.mode:
+            delta = "content+mode"
+        elif old.content != new.content:
+            delta = "content"
+        elif old.mode != new.mode:
+            delta = "mode"
+        else:
+            delta = "none"
+        out.append("audit shadowed layer=%d by=%d delta=%s size=%d off=%d "
+                   "content=%s new=%s newmode=%04o phex=%s" %
+                   (oldl, newl, delta, old.size, old.offset, old.content,
+                    new.content, new.mode, hx(p)))
     # One line per layer still publishing content the merged filesystem
     # does not show. Both kinds counted: deleted is RUN rm, shadowed is a
     # later layer writing over the path and publishing both versions.
