@@ -26,6 +26,7 @@ mutant that was never run. It is reported as BUILDFAIL and counted apart.
     mutate.py            run them all
     mutate.py NAME...    run only these
     mutate.py --list     print the table
+    mutate.py --check    every target still matches its source, in a second
 
 Standard library only.
 """
@@ -351,7 +352,45 @@ def run_one(name, keep_log=None):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def check():
+    """Every mutant's target appears exactly once in the source it names.
+
+    apply() asserts this already, one mutant at a time, in the middle of
+    a sweep that rebuilds and reruns the whole suite per mutant. So the
+    first stale record stops the run and hides every mutant behind it,
+    and the gate never notices because it runs three of them. Four
+    records had rotted that way before this existed, each because the
+    line it quotes was edited for an unrelated reason. This asks the
+    same question about all fifty in about a second, which is cheap
+    enough to put in "make test".
+    """
+    src, bad, edits = {}, [], 0
+    for name, f, es, _why in MUTANTS:
+        if f not in src:
+            src[f] = open(os.path.join(ROOT, f)).read()
+        for old, _new in es:
+            edits += 1
+            c = src[f].count(old)
+            if c != 1:
+                bad.append((name, f, c, old.strip().splitlines()[0][:60]))
+    for name, f, c, snip in bad:
+        print("STALE %-24s %s: target appears %d times, not once: %s"
+              % (name, f, c, snip))
+    missing = EQUIVALENT - {m[0] for m in MUTANTS}
+    for name in sorted(missing):
+        print("STALE %-24s EQUIVALENT names a mutant that no longer exists" % name)
+    if bad or missing:
+        print("mutants: %d of %d records no longer apply to the source"
+              % (len(bad) + len(missing), len(MUTANTS)))
+        return 1
+    print("mutants: %d records, %d edits, every target applies"
+          % (len(MUTANTS), edits))
+    return 0
+
+
 def main(argv):
+    if "--check" in argv:
+        return check()
     if "--list" in argv:
         for n, f, _edits, why in MUTANTS:
             print("%-24s %-10s %s" % (n, f, why))

@@ -19,6 +19,8 @@ ociv: $(wildcard *.go) go.mod
 # it reported "mutants: 2 caught, 1 survived as recorded equivale" for one
 # commit because the mutation summary was printed after it.
 test: all
+	@echo "[mutants] every planted defect still matches the line it quotes"
+	./t/mutate.py --check
 	@echo "[mutants] three planted defects: one must survive, two must be caught"
 	./t/mutate.py --smoke
 	@echo
