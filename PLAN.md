@@ -248,19 +248,31 @@ Ranked, by how little of it we control:
 - [x] The mutation suite: deliberate defects, each expected to turn a named
       assertion red
       why: a test that has never been watched to fail is not evidence.
+- [x] A per-layer leak summary, counted and printed
+      why: a leak buried among two hundred audit lines is a leak nobody
+      reads. The count per layer is the line that gets noticed.
+      done: one "audit leak layer=N deleted=D shadowed=S bytes=B" line
+      per layer that is still publishing removed content, with the two
+      kinds counted apart. Six layers across the corpus produce one.
 - [ ] Name the blob a leaked file's bytes are still in, and where
       why: "layer 0 still holds etc/secrets.txt" is a sentence. "the
       bytes are at offset N of sha256:abcd..., 41 of them" is something
       a reader can act on, and something GNU tar can be asked to confirm
       by extracting the same member and comparing.
-- [ ] A per-layer leak summary, counted and printed
-      why: a leak buried among two hundred audit lines is a leak nobody
-      reads. The count per layer is the line that gets noticed.
+      so far: off= and size= are printed and all 16 leaked files in the
+      corpus are pulled back out with dd and hashed. What is missing is
+      the blob: the finding says layer=0, so acting on it means reading
+      ociv info for the digest, and for a gzip layer the offset does not
+      index the blob at all.
 - [ ] A credential-shaped fixture for the leak, deleted by a later layer
       why: the finding this program exists for has been tested on files
       called "secrets.txt" containing the word secret. The shape that
       matters is a token and a private key header, and the corpus should
       hold one of each so the output can be looked at and believed.
+      so far: the token is in etc/config.ini, which layer 1 OVERWRITES,
+      and the suite pulls it back out and looks at it. The PEM header is
+      in home/user/.ssh/id_rsa, which nothing deletes. So the deleted
+      half of the finding has no credential-shaped fixture behind it.
 - [ ] Record the survivors, with the argument for each
       why: an honest mutation score needs its denominator and its
       exceptions written down, not rounded away.
@@ -284,10 +296,52 @@ Ranked, by how little of it we control:
       different project.
 - [x] Non-sha256 digest algorithms
       why: the spec permits sha512 and registered others. Refused by name.
-- [ ] Multi-platform index traversal
+- [x] Multi-platform index traversal
       why: a real index selects by platform, and the platform matching rules
       are their own small specification.
+      done: --platform over a flat three-architecture index and over a
+      nested one, checked against skopeo --override-arch. One level of
+      nesting is followed and two is refused. os.version and os.features
+      are parsed and ignored, which is written down in the README.
 - [ ] Content comparison of shadowed files across layers
       why: reporting that a path was overwritten is weaker than reporting
       that the bytes differ, and weaker still than reporting what the old
       bytes were.
+      so far: delta=content, delta=mode and delta=content+mode are
+      reported, with both digests, and the suite asserts delta=mode
+      really does mean the digests are equal. The old bytes themselves
+      still have to be fetched with dd.
+
+### Milestone 7: what writing the README turned up
+
+- [ ] Print the aggregate per-entry counts the README quotes
+      why: the README says 198 member tuples were compared against GNU
+      tar and the suite says "ok multi layer 0 entries". Those are the
+      same fact and only one of them is in the output, so the number in
+      the README is one somebody counted by hand once.
+- [ ] A member reader, with "tar -xOf" as the oracle
+      why: the leak findings give an offset and a digest and the way to
+      see the bytes is dd. GNU tar can extract one member by name to
+      stdout, which is an external authority for the whole path from
+      member name to bytes, and it is the thing that makes the shadowed
+      content comparison above possible.
+- [ ] A dangling hard link in the corpus
+      why: the census counts hardlink-dangling and it is 0, so the
+      branch that handles a link whose target is not in the layer has
+      never been reached by a test. GNU tar has an opinion about such an
+      archive and it has not been asked.
+- [ ] A whiteout marker that hits nothing
+      why: whiteout-hit-nothing is 0 for the same reason. A marker for a
+      path no lower layer holds is legal, common in squashed images, and
+      must not be reported as a deletion of something.
+- [ ] What GNU tar does when the layer also names the symlinked parent
+      why: the measured case has a layer writing ./bin/newfile where an
+      earlier layer left bin as a symlink, and no ./bin/ member. A layer
+      that names the directory too is the case where tar may replace the
+      symlink instead of following it, and the answer changes which path
+      the file lands at.
+- [ ] Put ociv's diagnostic code in the skopeo verdict table
+      why: the table prints "skopeo=accept ociv=reject" for nineteen
+      images and the reason is in neither column, so the README had to
+      carry a hand-written third column saying which spec clause each
+      one breaks.
