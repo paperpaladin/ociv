@@ -65,15 +65,16 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 450 passed, 0 failed |
+| assertions | 459 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
-| tar member tuples against GNU tar | 198 compared, 198 same, 0 differ |
+| tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
 | the same tuples against python tarfile | 198 compared, 198 same, 0 differ |
 | member data offsets, and the bytes found at them | 86 members, 0 differ, 76 of them non-empty |
 | merged trees against the Python merge | 118 nodes over 14 images, 0 differ |
 | merged trees against GNU tar extracting the layers | 99 nodes over 11 images, 0 differ |
 | audit findings against the Python audit | 55 findings over 14 images, 0 differ |
+| construct counts against the Python census | 364 counts over 14 images, 0 differ |
 | leaked files pulled back out of the blob with `dd` | 16 |
 | broken images where skopeo also refuses | 8 of 19 |
 | malformed images in `make test` | 316 runs, 313 rejected, 0 crashed, 0 hung |
@@ -87,10 +88,14 @@ mode is the field the audit rests on.
 
 Refusals are counted apart from disagreements, because they need different
 work. A disagreement is a bug. A refusal is a feature that is not written.
-There are no refusals in any of the per-entry comparisons above, because
-every layer in the corpus is in a format ociv reads. The refusals are
-whole-image, there are five shapes of them, and each is put to skopeo on the
-same bytes:
+The 25 in the first row are the members of one layer: `bad-zstd-layer` is
+`multi` with layer 0's media type relabelled `tar+zstd` and the bytes left
+alone, so GNU tar lists all 25 members of it and ociv declines to read any.
+That image is in the corpus so the refused column counts something; a
+column that can only ever print zero is decoration.
+
+The other refusals are whole-image, there are five shapes of them, and each
+is put to skopeo on the same bytes:
 
 ```
 a zstd layer               skopeo accepts, ociv exits 3

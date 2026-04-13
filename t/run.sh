@@ -55,16 +55,29 @@ eq() {
 	fi
 }
 
-# diffeq NAME FILE_A FILE_B -- compare two fact listings line for line.
-# Per entry, never per image: "the images differ" is not a finding.
+# TALLY carries the per-entry totals: one line of "KEY compared differ
+# refused" per comparison, summed at the end of the run. The assertions
+# below are one per layer or one per image, and "ok multi layer 0 entries"
+# does not say whether that was four tuples or four hundred. The number
+# the README quotes should be the suite's own, not one counted by hand
+# into a file nobody re-counts.
+TALLY=$W/tally
+: > "$TALLY"
+tallied() { echo "$1 $2 $3 $4" >> "$TALLY"; }
+
+# diffeq NAME FILE_A FILE_B [TALLYKEY] -- compare two fact listings line
+# for line. Per entry, never per image: "the images differ" is not a
+# finding.
 diffeq() {
 	if diff -u "$2" "$3" > "$W/d.$$" 2>&1; then
 		ok "$1"
+		if [ -n "${4:-}" ]; then tallied "$4" "$(wc -l < "$2")" 0 0; fi
 	else
 		bad "$1"
 		sed -n '3,22p' "$W/d.$$" | sed 's/^/       /'
 		n=$(grep -c '^[-+]' "$W/d.$$")
 		echo "       ($n differing lines in total)"
+		if [ -n "${4:-}" ]; then tallied "$4" "$(wc -l < "$2")" "$n" 0; fi
 	fi
 	rm -f "$W/d.$$"
 }
@@ -217,16 +230,34 @@ for img in $GOOD; do
 	for f in $(layers_of "$img"); do
 		base=$(basename "$f" .tar)
 		"$OCIV" layers "$IMG/$img" | python3 ./t/tarfacts.py ociv --sanitise-links - "$i" > "$W/ociv.$img.$i"
-		diffeq "$img layer $i entries: ociv vs GNU tar" "$W/gnu.$base" "$W/ociv.$img.$i"
+		diffeq "$img layer $i entries: ociv vs GNU tar" "$W/gnu.$base" "$W/ociv.$img.$i" entries-gnu
 		# python's tarfile strips a trailing slash from a directory
 		# name and GNU tar does not, so that one comparison is run
 		# with both sides normalised.
 		python3 ./t/tarfacts.py py --strip "$f" > "$W/pys.$base"
 		"$OCIV" layers "$IMG/$img" | python3 ./t/tarfacts.py ociv --strip - "$i" > "$W/ocivs.$img.$i"
-		diffeq "$img layer $i entries: ociv vs python tarfile" "$W/pys.$base" "$W/ocivs.$img.$i"
+		diffeq "$img layer $i entries: ociv vs python tarfile" "$W/pys.$base" "$W/ocivs.$img.$i" entries-py
 		i=$((i+1))
 	done
 done
+
+# The refused column, measured rather than declared. bad-zstd-layer is
+# multi with layer 0's media type relabelled as tar+zstd and the bytes
+# left alone, so GNU tar lists every member of it and ociv declines to
+# read any of them. A refusal is not a disagreement and the totals at the
+# end of this run keep the two apart; without an image in this state the
+# "0 refused" column would come from a branch nothing can reach, which is
+# decoration rather than a result.
+"$OCIV" layers "$IMG/bad-zstd-layer" >/dev/null 2>&1
+zrc=$?
+nz=$(wc -l < "$W/gnu.m0")
+eq "a layer relabelled tar+zstd is refused, not read" "3" "$zrc"
+if [ "$zrc" = 3 ] && [ "$nz" -gt 0 ]; then
+	tallied entries-gnu 0 0 "$nz"
+	ok "GNU tar lists $nz members of that layer, so the refused column is a measurement"
+else
+	bad "no layer was refused while GNU tar could list it: the refused column counts nothing"
+fi
 
 # The one place GNU tar and ociv genuinely disagree, pinned so that a
 # change on either side is a failure rather than a silent renormalisation.
@@ -271,7 +302,7 @@ for img in $GOOD; do
 					if ($j ~ /^nhex=/)    n = substr($j,6); }
 				print o, $8, c, n }' > "$W/ocivoff.$img.$i"
 		diffeq "$img layer $i data offsets: ociv vs python tarfile, and the bytes at them" \
-			"$W/off.$img.$i" "$W/ocivoff.$img.$i"
+			"$W/off.$img.$i" "$W/ocivoff.$img.$i" offsets
 		i=$((i+1))
 	done
 done
@@ -294,11 +325,11 @@ for img in $GOOD; do
 	for cmd in tree audit; do
 		"$OCIV" "$cmd" "$IMG/$img" > "$W/o.$img.$cmd"
 		python3 ./t/oracle.py "$cmd" $(layers_of "$img") > "$W/p.$img.$cmd"
-		diffeq "$img $cmd: ociv vs the Python implementation" "$W/p.$img.$cmd" "$W/o.$img.$cmd"
+		diffeq "$img $cmd: ociv vs the Python implementation" "$W/p.$img.$cmd" "$W/o.$img.$cmd" "$cmd-py"
 	done
 	"$OCIV" stats "$IMG/$img" > "$W/o.$img.stats"
 	python3 ./t/oracle.py census $(layers_of "$img") > "$W/p.$img.stats"
-	diffeq "$img stats: ociv vs the Python implementation" "$W/p.$img.stats" "$W/o.$img.stats"
+	diffeq "$img stats: ociv vs the Python implementation" "$W/p.$img.stats" "$W/o.$img.stats" stats-py
 done
 
 echo
@@ -373,7 +404,7 @@ for img in single multi multigz longgnu longpax dup xattr opq samelayer symwh; d
 		continue
 	fi
 	diffeq "$img merged tree ($n paths): ociv vs GNU tar extracting the layers" \
-		"$W/ex.$img.facts" "$W/tr.$img.facts"
+		"$W/ex.$img.facts" "$W/tr.$img.facts" tree-tar
 done
 # The filter above is not free: assert that it is doing something, and
 # that what it drops is exactly the implicit parent directory.
@@ -447,7 +478,7 @@ if [ "$nex" -lt 1 ]; then
 	bad "symparent: sequential GNU tar extraction produced nothing"
 else
 	diffeq "symparent merged tree ($nex paths): ociv vs sequential GNU tar extraction" \
-		"$W/ex.symparent.facts" "$W/tr.symparent.facts"
+		"$W/ex.symparent.facts" "$W/tr.symparent.facts" tree-tar
 fi
 # And the fact that makes the comparison above worth running at all: the
 # redirected path is present on disk and the literal one is not. Without
@@ -1085,6 +1116,38 @@ if [ -f "$W/multi.tar" ]; then
 else
 	bad "skopeo did not produce a docker-archive"
 fi
+
+echo
+echo "--- what the per-entry comparisons actually compared ---"
+# Every assertion above is one per layer or one per image. This is the
+# number of facts behind them, which is the figure the README quotes and
+# the figure that falls to nothing first if a comparison stops finding
+# its input. Refusals are a separate column because they need different
+# work: a disagreement is a bug and a refusal is a feature that is not
+# written.
+awk '{c[$1]+=$2; d[$1]+=$3; r[$1]+=$4}
+     END {for (k in c) printf "%s %d %d %d\n", k, c[k], d[k], r[k]}' \
+	"$TALLY" | sort > "$W/tallysum"
+tsum() {  # tsum KEY FLOOR WHAT
+	tk=$1 tf=$2 tw=$3
+	tc=$(awk -v k="$tk" '$1==k {print $2}' "$W/tallysum"); tc=${tc:-0}
+	td=$(awk -v k="$tk" '$1==k {print $3}' "$W/tallysum"); td=${td:-0}
+	tx=$(awk -v k="$tk" '$1==k {print $4}' "$W/tallysum"); tx=${tx:-0}
+	if [ "$tc" -lt "$tf" ]; then
+		bad "$tw: $tc compared, below the floor of $tf; something stopped producing input"
+	elif [ "$td" -ne 0 ]; then
+		bad "$tw: $tc compared, $td differ, $tx refused"
+	else
+		ok "$tw: $tc compared, $tc same, 0 differ, $tx refused"
+	fi
+}
+tsum entries-gnu 150 "member tuples against GNU tar"
+tsum entries-py  150 "member tuples against python tarfile"
+tsum offsets      60 "member data offsets against python tarfile and the bytes there"
+tsum tree-py     100 "merged tree nodes against the Python merge"
+tsum tree-tar     80 "merged tree nodes against GNU tar extracting the layers"
+tsum audit-py     40 "audit findings against the Python audit"
+tsum stats-py    300 "construct counts against the Python census"
 
 echo
 echo "$pass passed, $fail failed"
