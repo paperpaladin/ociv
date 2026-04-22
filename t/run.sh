@@ -937,6 +937,16 @@ eq "all three platforms were checked" "3" "$nplat"
 status "a platform the index does not hold is invalid, not a refusal" \
 	1 "$OCIV" verify "$MA" --platform linux/riscv64
 status "a malformed --platform is a usage error" 2 "$OCIV" verify "$MA" --platform amd64
+# Where the flag sits on the line. parsePlatform takes it out of the
+# argument list and hands back the rest, and run() read os.Args[1:]
+# again instead of that, so the leading spelling took "--platform" as
+# the command and "linux/arm64" as the image: "stat linux/arm64: no such
+# file or directory", exit 2, which reads like a typo in the path. Every
+# test above puts the flag last, which is why it survived.
+lead=$("$OCIV" --platform linux/arm64 info "$MA" | awk '$1=="manifest" {print $2}')
+trail=$("$OCIV" info "$MA" --platform linux/arm64 | awk '$1=="manifest" {print $2}')
+eq "--platform before the command selects the same manifest as after it" "$trail" "$lead"
+[ -n "$trail" ] || bad "neither spelling selected anything, so the comparison above is vacuous"
 # @DIGEST still works and still narrows to one, which is the escape hatch
 # for an index whose entries carry no platform field at all.
 dg=$(awk '$1=="linux/arm64" {print $2}' "$IMG/multiarch.platforms")

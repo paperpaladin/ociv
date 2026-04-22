@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -224,7 +223,7 @@ const (
 )
 
 func run() int {
-	args := os.Args[1:]
+	args := cmdArgs
 	cmd, arg := args[0], args[1]
 	im, err := OpenImage(arg)
 	if err != nil {

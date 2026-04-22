@@ -77,6 +77,14 @@ func refuse(format string, a ...any) {
 // is exactly one of it and it is read in exactly one place.
 var wantPlatform string
 
+// cmdArgs is the argument list with the flags taken out, which is what
+// run() must read. run() used to read os.Args[1:] itself, so
+// "ociv --platform linux/arm64 verify IMG" took "--platform" as the
+// command and "linux/arm64" as the image and said "stat linux/arm64: no
+// such file or directory". Only the trailing spelling worked, and only
+// the trailing spelling had ever been tried.
+var cmdArgs []string
+
 // parsePlatform pulls --platform and its value out of the argument list
 // and returns what is left, so the existing "COMMAND IMAGE" shape is
 // untouched. --platform= with the value attached is accepted too, because
@@ -113,7 +121,8 @@ func main() {
 			os.Exit(exitPanic)
 		}
 	}()
-	args := parsePlatform(os.Args[1:])
+	cmdArgs = parsePlatform(os.Args[1:])
+	args := cmdArgs
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(exitUsage)
