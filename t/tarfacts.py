@@ -7,6 +7,7 @@ sources, in one format, so they can be compared line for line.
     tarfacts.py ociv FILE         re-normalise ociv's "entry" lines from stdin
     tarfacts.py names FILE...     the normalised paths the archives NAME
     tarfacts.py offsets FILE.tar  where each file member's DATA starts
+    tarfacts.py filemembers FILE.tar  the regular files, as name and path
 
 Format, one line per entry, fields separated by single spaces:
 
@@ -227,6 +228,26 @@ def names(paths):
         print(h)
 
 
+def filemembers(path):
+    """Every regular file member, as "NAMEHEX PATHHEX".
+
+    NAMEHEX is the name as the archive spells it, which is what GNU tar
+    wants on the command line to extract that one member. PATHHEX is the
+    same name normalised the way the OCI layer document normalises it,
+    which is what ociv prints as phex and takes as an argument. The
+    normalisation here is leading "./" and trailing "/" removed, done in
+    python so that the comparison is not ociv checking its own spelling.
+    """
+    with tarfile.open(path, "r:*") as t:
+        for m in t.getmembers():
+            if not m.isreg():
+                continue
+            n = m.name.encode("utf-8", "surrogateescape")
+            p = n[2:] if n.startswith(b"./") else n
+            p = p.rstrip(b"/")
+            print("%s %s" % (n.hex(), p.hex()))
+
+
 def offsets(path):
     """Where each regular file member's data starts, and the sha256 of the
     bytes read from that offset in the file itself rather than through
@@ -261,6 +282,9 @@ def main(argv):
         return
     if mode == "offsets":
         offsets(path)
+        return
+    if mode == "filemembers":
+        filemembers(path)
         return
     if mode == "gnu":
         emit(from_gnu(path), strip, sanlinks)

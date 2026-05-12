@@ -42,6 +42,7 @@ const usage = `usage: ociv COMMAND IMAGE
   tree    IMAGE   the merged root filesystem after whiteouts are applied
   audit   IMAGE   the security-relevant findings, one per line
   stats   IMAGE   how many of each construct the image contains
+  cat     IMAGE LAYER PATHHEX   one member's bytes, to stdout
 
 IMAGE is an OCI image layout directory or a docker-archive tar, optionally
 suffixed with :TAG or @sha256:HEX to select one manifest from an index.
@@ -51,6 +52,10 @@ suffixed with :TAG or @sha256:HEX to select one manifest from an index.
 A published image is one tag over several architectures, so :TAG does not
 narrow such an index at all and --platform is the thing that does. With
 more than one candidate left, ociv refuses and lists them.
+
+PATHHEX for cat is the phex field an audit or tree line prints, so a
+finding can be turned back into its bytes without retyping a path that
+may contain a newline.
 
 exit 0 clean, 1 the image is invalid, 2 usage, 3 refused as unimplemented.
 `
@@ -131,6 +136,16 @@ func main() {
 	if cmd == "-h" || cmd == "--help" || cmd == "help" {
 		fmt.Print(usage)
 		os.Exit(exitOK)
+	}
+	if cmd == "cat" {
+		// Three arguments, and the path in hex rather than as text,
+		// so the phex field of an audit line goes straight in. A
+		// member name may contain a newline and no shell argument
+		// survives one.
+		if len(args) != 4 {
+			fail(exitUsage, "cat takes IMAGE, a layer number and a hex path")
+		}
+		os.Exit(run())
 	}
 	if len(args) != 2 {
 		fail(exitUsage, "%s takes exactly one IMAGE argument", cmd)

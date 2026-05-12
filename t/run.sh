@@ -317,6 +317,72 @@ else
 fi
 
 echo
+echo "--- cat: one member's bytes, against tar writing the same member ---"
+# GNU tar can write a single member to stdout by name, which is an
+# external authority for the whole path from "the audit says phex=X in
+# layer N" to the bytes themselves. t/catcmp.py drives both sides,
+# because the member names and the bytes both have to survive intact and
+# a shell argument does not survive a newline.
+ncat=0 ncatbad=0 ncatdup=0
+for img in $GOOD; do
+	[ "$img" = multigz ] && continue   # same uncompressed members as multi
+	python3 ./t/catcmp.py "$OCIV" "$IMG/$img" $(layers_of "$img") > "$W/cat.$img" 2>&1
+	line=$(grep '^catcmp:' "$W/cat.$img")
+	n=$(echo "$line"  | awk '{print $2}')
+	d=$(echo "$line"  | awk '{print $4}')
+	k=$(echo "$line"  | awk '{print $6}')
+	ncat=$((ncat + n)); ncatbad=$((ncatbad + d)); ncatdup=$((ncatdup + k))
+	[ "$d" = 0 ] || sed -n '/^  layer/p' "$W/cat.$img" | sed 's/^/     /'
+done
+eq "every member GNU tar writes to stdout comes back the same from ociv cat" "0" "$ncatbad"
+if [ "$ncat" -ge 40 ]; then
+	ok "$ncat members compared byte for byte against tar -xOf"
+else
+	bad "only $ncat members went through tar -xOf: the comparison is near-vacuous"
+fi
+# The one place the two differ on purpose. dup names ./etc/dup twice;
+# extraction leaves the second and so does ociv, while tar -xOf by name
+# writes both members one after the other. catcmp.py leaves such paths
+# out, so the difference is asserted here instead of being averaged into
+# a mismatch count.
+eq "catcmp left both members of the duplicated path out, rather than calling them mismatches" "2" "$ncatdup"
+# Why catcmp runs tar with -P, measured rather than assumed. GNU tar
+# rewrites the member name it was GIVEN before matching, so a member
+# whose name leaves the root cannot be asked for by its real name and
+# cannot be asked for by the sanitised one either, because the archive
+# holds the unsanitised spelling. Three members of the escape layer are
+# in that position. ociv has no such rule: it reports and serves what
+# the header says, which is what a tool looking for a supply-chain
+# attack needs.
+printf '../etc/shadow\0' | tar -xOf "$L/escape.tar" --null -T - >/dev/null 2>"$W/tarp.err"
+eq "GNU tar without -P refuses to name a member containing dot-dot" "2" "$?"
+if grep -q "Member name contains" "$W/tarp.err"; then
+	ok "and says so: $(grep -o "Member name contains .*" "$W/tarp.err" | head -1)"
+else
+	bad "GNU tar refused for some other reason: $(head -1 "$W/tarp.err")"
+fi
+printf 'etc/shadow\0' | tar -xOf "$L/escape.tar" --null -T - >/dev/null 2>"$W/tarp2.err"
+if grep -q "Not found in archive" "$W/tarp2.err"; then
+	ok "and the sanitised spelling is not in the archive either"
+else
+	bad "tar found etc/shadow in an archive that does not contain it"
+fi
+ndd=$("$OCIV" cat "$IMG/escape" 0 "$(printf -- '../etc/shadow' | od -An -tx1 | tr -d ' \n')" | wc -c)
+eq "ociv cat serves the member by the name the header holds" "16" "$ndd"
+dboth=$(printf './etc/dup\0' | tar -xOf "$L/dup.tar" --null -T - | wc -c)
+dlast=$("$OCIV" cat "$IMG/dup" 0 "$(printf 'etc/dup' | od -An -tx1 | tr -d ' \n')" | wc -c)
+eq "tar -xOf writes both members of a duplicated path" "21" "$dboth"
+eq "ociv cat gives the last one, which is what extraction leaves" "15" "$dlast"
+status "cat on a path the layer does not hold is a usage error" \
+	2 "$OCIV" cat "$IMG/single" 0 6e6f742d686572652e747874
+status "cat with a layer number past the end is a usage error" \
+	2 "$OCIV" cat "$IMG/single" 9 6574632f6d6f7464
+status "cat with an odd-length hex path is a usage error" \
+	2 "$OCIV" cat "$IMG/single" 0 abc
+status "cat on a zstd layer is a refusal, not a wrong answer" \
+	3 "$OCIV" cat "$IMG/bad-zstd-layer" 0 6574632f6d6f7464
+
+echo
 echo "--- oracle: the Python second implementation of the merge ---"
 # No tool on this machine applies whiteouts, so the authority here is a
 # second implementation written from the spec text in another language.

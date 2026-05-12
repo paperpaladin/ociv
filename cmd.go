@@ -1,8 +1,11 @@
 package main
 
 import (
+	"archive/tar"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -217,6 +220,73 @@ func printEntry(e Entry) {
 		q(e.Name), q(e.Linkname), strings.Join(extra, " "))
 }
 
+// cmdCat writes one member's bytes to stdout. The leak findings say that
+// a deleted file's bytes are still in layer 0 at offset 3584, and until
+// now the only way to look at them was dd with three numbers copied out
+// of the report by hand. The argument is the phex field of an audit or
+// tree line, unchanged: a member name may hold a newline and a shell
+// argument may not survive one.
+//
+// Where a layer names the same path twice, the LAST member wins, because
+// that is what extraction leaves on disk. GNU tar -xOf writes both, one
+// after the other, so that is the one place this command and its oracle
+// differ on purpose, and the suite pins the difference rather than
+// averaging it away.
+func cmdCat(im *Image, layer int, phex string) int {
+	want, err := hex.DecodeString(phex)
+	if err != nil {
+		fail(exitUsage, "PATHHEX %q is not hex: %v", phex, err)
+	}
+	if layer < 0 || layer >= len(im.Manifest.Layers) {
+		fail(exitUsage, "layer %d: the image has %d", layer, len(im.Manifest.Layers))
+	}
+	r, _, closeFn, err := im.layerReader(layer)
+	if err != nil {
+		fail(exitInvalid, "%v", err)
+	}
+	defer closeFn()
+	target := string(want)
+	var found []byte
+	tr := tar.NewReader(r)
+	for n := 0; ; n++ {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fail(exitInvalid, "layer %d entry %d: %v", layer, n, err)
+		}
+		if h.Typeflag != tar.TypeReg && h.Typeflag != 0 {
+			continue
+		}
+		// Either spelling: the normalised path, which is what the
+		// tree and the leak findings print as phex, or the member
+		// name exactly as the archive holds it, which is what the
+		// escape finding prints. A member whose name leaves the
+		// root has no normalised path inside the root, so matching
+		// only the normalised form makes the one kind of member a
+		// reader most wants to look at the one kind cat cannot
+		// reach.
+		if p, _, _ := cleanPath(h.Name); p != target && h.Name != target {
+			continue
+		}
+		b, err := io.ReadAll(tr)
+		if err != nil {
+			fail(exitInvalid, "layer %d entry %d: %v", layer, n, err)
+		}
+		found = b
+	}
+	// Not an invalid image and not a refusal: the caller asked for
+	// something this layer does not hold, which is a usage error. A
+	// hard link or a symlink at that path is the same answer, because
+	// the member carries no bytes of its own.
+	if found == nil {
+		fail(exitUsage, "layer %d has no regular file member at %q", layer, target)
+	}
+	os.Stdout.Write(found)
+	return exitOK
+}
+
 const (
 	and3 = '3' // tar.TypeChar
 	and4 = '4' // tar.TypeBlock
@@ -250,6 +320,12 @@ func run() int {
 		return cmdAudit(im)
 	case "stats":
 		return cmdStats(im)
+	case "cat":
+		n, err := strconv.Atoi(args[2])
+		if err != nil {
+			fail(exitUsage, "cat: LAYER %q is not a number", args[2])
+		}
+		return cmdCat(im, n, args[3])
 	}
 	fail(exitUsage, "unknown command %q", cmd)
 	return exitUsage

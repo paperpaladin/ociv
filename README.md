@@ -13,6 +13,7 @@ ociv layers IMAGE    every tar entry of every layer, one fact per line
 ociv tree   IMAGE    the merged root filesystem after whiteouts are applied
 ociv audit  IMAGE    the security-relevant findings, one per line
 ociv stats  IMAGE    how many of each construct the image contains
+ociv cat    IMAGE LAYER PATHHEX   one member's bytes, to stdout
 ```
 
 `IMAGE` takes a `:TAG` or `@sha256:HEX` suffix to pick one manifest out of an
@@ -65,7 +66,7 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 459 passed, 0 failed |
+| assertions | 473 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
 | tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
@@ -75,11 +76,12 @@ Measured on 20 October 2026. `make test` prints all of them.
 | merged trees against GNU tar extracting the layers | 99 nodes over 11 images, 0 differ |
 | audit findings against the Python audit | 55 findings over 14 images, 0 differ |
 | construct counts against the Python census | 364 counts over 14 images, 0 differ |
+| member bytes against `tar -P -xOf` | 60 members, 0 differ, 2 duplicate paths apart |
 | leaked files pulled back out of the blob with `dd` | 16 |
 | broken images where skopeo also refuses | 8 of 19 |
 | malformed images in `make test` | 316 runs, 313 rejected, 0 crashed, 0 hung |
 | malformed images in `make sweep` | 26,660 runs, 26,492 rejected, 0 crashed, 0 hung |
-| mutants | 50 planted, 48 caught, 2 equivalent survivors |
+| mutants | 53 planted, 51 caught, 2 equivalent survivors |
 
 The tuple compared per member is (type, mode, uid, gid, size, name, link),
 with the name in hex. Not the number of entries: a reader that gets the size
@@ -136,6 +138,22 @@ with `sha256sum`, and requires the result to be the digest the finding
 names. For `etc/config.ini` it goes further and looks at
 what came back, which is the token the merged tree's copy of that path no
 longer has.
+
+`ociv cat IMAGE LAYER PATHHEX` writes that member's bytes to stdout, taking
+the `phex` field straight off the finding. The path is hex because a member
+name may hold a newline and no shell argument survives one. GNU tar writing
+the same member with `tar -P -xOf` is the oracle, over all 60 non-duplicated
+file members of the corpus.
+
+Two differences there, both pinned rather than smoothed over. A path a layer
+names twice: `tar -xOf` by name writes both members one after the other and
+`ociv cat` gives the last, which is what extraction leaves on disk. And GNU
+tar rewrites the member name it was given before matching, so without `-P`
+it refuses `../etc/shadow` with "Member name contains '..'", exit 2, while
+the sanitised `etc/shadow` is not in the archive at all. The three escaping
+members of the corpus cannot be asked for by name without the flag. ociv has
+no such rule and serves what the header says, which is the answer a tool
+looking for a supply-chain attack needs.
 
 The `leak` line is one per layer that is still publishing removed content,
 with the two counts kept apart, because a leak buried in two hundred audit
