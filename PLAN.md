@@ -254,16 +254,17 @@ Ranked, by how little of it we control:
       done: one "audit leak layer=N deleted=D shadowed=S bytes=B" line
       per layer that is still publishing removed content, with the two
       kinds counted apart. Six layers across the corpus produce one.
-- [ ] Name the blob a leaked file's bytes are still in, and where
+- [x] Name the blob a leaked file's bytes are still in, and where
       why: "layer 0 still holds etc/secrets.txt" is a sentence. "the
       bytes are at offset N of sha256:abcd..., 41 of them" is something
       a reader can act on, and something GNU tar can be asked to confirm
       by extracting the same member and comparing.
-      so far: off= and size= are printed and all 16 leaked files in the
-      corpus are pulled back out with dd and hashed. What is missing is
-      the blob: the finding says layer=0, so acting on it means reading
-      ociv info for the digest, and for a gzip layer the offset does not
-      index the blob at all.
+      done: blob= and comp= on every deleted, shadowed and leak line.
+      The dd check opens the blob the finding names rather than a
+      tarball the harness kept, and inflates it when comp says gzip, so
+      26 leaks are confirmed against the published bytes and 10 of them
+      go through the compressed path. GNU tar confirming the same member
+      is ociv cat, measured against tar -P -xOf.
 - [ ] A credential-shaped fixture for the leak, deleted by a later layer
       why: the finding this program exists for has been tested on files
       called "secrets.txt" containing the word secret. The shape that
@@ -303,6 +304,13 @@ Ranked, by how little of it we control:
       nested one, checked against skopeo --override-arch. One level of
       nesting is followed and two is refused. os.version and os.features
       are parsed and ignored, which is written down in the README.
+- [x] --platform before the command, which did not work
+      why: nine assertions about platform selection and every one of
+      them spelled the invocation the same way, so the other spelling
+      was never run.
+      done: run() read os.Args over again instead of the
+      list parsePlatform returned, so the flag only worked when it came
+      after the command, and every test spelled it that way.
 - [ ] Content comparison of shadowed files across layers
       why: reporting that a path was overwritten is weaker than reporting
       that the bytes differ, and weaker still than reporting what the old
@@ -314,17 +322,24 @@ Ranked, by how little of it we control:
 
 ### Milestone 7: what writing the README turned up
 
-- [ ] Print the aggregate per-entry counts the README quotes
+- [x] Print the aggregate per-entry counts the README quotes
       why: the README says 198 member tuples were compared against GNU
       tar and the suite says "ok multi layer 0 entries". Those are the
       same fact and only one of them is in the output, so the number in
       the README is one somebody counted by hand once.
-- [ ] A member reader, with "tar -xOf" as the oracle
+      done: seven totals with a floor each, and a refused column that
+      counts the 25 members of a layer relabelled tar+zstd.
+- [x] A member reader, with "tar -xOf" as the oracle
       why: the leak findings give an offset and a digest and the way to
       see the bytes is dd. GNU tar can extract one member by name to
       stdout, which is an external authority for the whole path from
       member name to bytes, and it is the thing that makes the shadowed
       content comparison above possible.
+      done: ociv cat IMAGE LAYER PATHHEX, 60 members compared against
+      tar -P -xOf. Two differences measured rather than averaged: tar
+      writes both members of a duplicated path and cat gives the last,
+      and GNU tar without -P will not name a member containing dot-dot
+      at all.
 - [ ] A dangling hard link in the corpus
       why: the census counts hardlink-dangling and it is 0, so the
       branch that handles a link whose target is not in the layer has

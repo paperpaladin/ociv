@@ -126,6 +126,30 @@ layers_of() {
 }
 GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symwh symout symescape"
 
+# blobfacts IMAGE -- "DIGEST:COMPRESSION" per layer, comma separated.
+#
+# The leak findings name the blob a leaked file is still inside, and the
+# Python second implementation is handed layer tarballs rather than an
+# image, so it cannot derive that for itself and is told. The digest
+# comes from sha256sum over the blob file, not from ociv, so the digest
+# in the finding is checked against coreutils. Which file is layer i,
+# and what its media type is, comes out of the manifest skopeo serves.
+blobfacts() {
+	skopeo inspect --raw "oci:$IMG/$1:latest" > "$W/bf.raw" 2>/dev/null || return 1
+	python3 -c '
+import json, sys
+m = json.load(open(sys.argv[1]))
+for l in m["layers"]:
+    mt = l["mediaType"]
+    comp = "gzip" if mt.endswith("+gzip") else "zstd" if mt.endswith("+zstd") else "none"
+    print(l["digest"], comp)
+' "$W/bf.raw" | while read -r dg comp; do
+		f=$IMG/$1/blobs/$(echo "$dg" | tr : /)
+		real=sha256:$(sha256sum "$f" | cut -d" " -f1)
+		printf "%s:%s," "$real" "$comp"
+	done | sed 's/,$//'
+}
+
 # The census, from the Python reader, summed over every image. Printed
 # because a reader has to be able to see that the corpus contains what the
 # tests below claim to exercise, and asserted because a whiteout test over
@@ -390,7 +414,12 @@ echo "--- oracle: the Python second implementation of the merge ---"
 for img in $GOOD; do
 	for cmd in tree audit; do
 		"$OCIV" "$cmd" "$IMG/$img" > "$W/o.$img.$cmd"
-		python3 ./t/oracle.py "$cmd" $(layers_of "$img") > "$W/p.$img.$cmd"
+		if [ "$cmd" = audit ]; then
+			python3 ./t/oracle.py audit $(layers_of "$img") \
+				--blobs "$(blobfacts "$img")" > "$W/p.$img.$cmd"
+		else
+			python3 ./t/oracle.py "$cmd" $(layers_of "$img") > "$W/p.$img.$cmd"
+		fi
 		diffeq "$img $cmd: ociv vs the Python implementation" "$W/p.$img.$cmd" "$W/o.$img.$cmd" "$cmd-py"
 	done
 	"$OCIV" stats "$IMG/$img" > "$W/o.$img.stats"
@@ -585,35 +614,53 @@ echo "--- the leak, confirmed by pulling the bytes back out of the layer ---"
 # length straight out of the layer archive with dd and hashes what comes
 # back. If the bytes were not there, or were somewhere else, the digest
 # would not match: no part of this goes through either reader.
-nleak=0
+# The blob the finding NAMES is the file this opens, not a tarball the
+# harness happened to keep: blob= has to be load-bearing or it is
+# decoration. For comp=gzip the blob is inflated first, because off=
+# counts bytes in the uncompressed stream, which is the distinction the
+# comp field exists for and the reason multigz is no longer skipped.
+nleak=0 nleakgz=0
 for img in $GOOD; do
-	[ "$img" = multigz ] && continue   # same uncompressed layers as multi
-	set -- $(layers_of "$img")
 	"$OCIV" audit "$IMG/$img" | awk '$2=="deleted" || $2=="shadowed"' |
 	while read -r _a kind rest; do
-		lay=${rest#layer=}; lay=${lay%% *}
-		sz=$(echo "$rest"  | tr ' ' '\n' | sed -n 's/^size=//p')
-		off=$(echo "$rest" | tr ' ' '\n' | sed -n 's/^off=//p')
-		want=$(echo "$rest" | tr ' ' '\n' | sed -n 's/^content=//p')
-		ph=$(echo "$rest"  | tr ' ' '\n' | sed -n 's/^phex=//p')
-		eval "tarf=\${$((lay+1))}"
-		got="sha256:$(dd if="$tarf" bs=1 skip="$off" count="$sz" \
+		fld() { echo "$rest" | tr ' ' '\n' | sed -n "s/^$1=//p"; }
+		sz=$(fld size); off=$(fld off); want=$(fld content); ph=$(fld phex)
+		bl=$(fld blob); cp=$(fld comp)
+		bf=$IMG/$img/blobs/$(echo "$bl" | tr : /)
+		if [ ! -f "$bf" ]; then
+			echo "NO $img $kind $ph no blob file at $bf"
+			continue
+		fi
+		case $cp in
+		gzip) gzip -dc "$bf" > "$W/inflated" && src=$W/inflated ;;
+		none) src=$bf ;;
+		*)    echo "NO $img $kind $ph unexpected comp=$cp"; continue ;;
+		esac
+		got="sha256:$(dd if="$src" bs=1 skip="$off" count="$sz" \
 			2>/dev/null | sha256sum | cut -d' ' -f1)"
 		if [ "$got" = "$want" ]; then
-			echo "OK $img $kind $ph"
+			echo "OK $img $kind $cp $ph"
 		else
-			echo "NO $img $kind $ph want=$want got=$got off=$off size=$sz"
+			echo "NO $img $kind $ph want=$want got=$got off=$off size=$sz comp=$cp"
 		fi
 	done > "$W/leak.$img"
 	n=$(grep -c '^NO ' "$W/leak.$img")
 	eq "$img: every leaked file's bytes are at the offset reported" "0" "$n"
 	[ "$n" = 0 ] || sed -n '/^NO /p' "$W/leak.$img" | sed 's/^/       /' | head -5
 	nleak=$((nleak + $(grep -c '^OK ' "$W/leak.$img")))
+	nleakgz=$((nleakgz + $(grep -c '^OK .* gzip ' "$W/leak.$img")))
 done
 if [ "$nleak" -ge 10 ]; then
-	ok "$nleak leaked files were pulled back out of the layers with dd"
+	ok "$nleak leaked files were pulled back out of the blobs the findings name"
 else
-	bad "only $nleak leaks were confirmed against the archive bytes"
+	bad "only $nleak leaks were confirmed against the blob bytes"
+fi
+# Without a compressed image in that count, the comp field would never
+# have been read and the gzip branch above would never have run.
+if [ "$nleakgz" -ge 5 ]; then
+	ok "$nleakgz of them came out of a gzip blob, inflated first because comp said so"
+else
+	bad "only $nleakgz leaks went through a compressed blob: comp= is untested"
 fi
 # The whole point, said as a fact about one named path. multi's layer 1
 # writes etc/secrets.txt and layer 2 whiteouts it: the merged tree does
@@ -621,7 +668,7 @@ fi
 hasnt "etc/secrets.txt is not in the merged tree"    multi etc/secrets.txt
 sec=$(printf 'etc/secrets.txt' | od -An -tx1 | tr -d ' \n')
 grep -q " $sec\$" "$W/leak.multi" || bad "etc/secrets.txt was not among the confirmed leaks"
-grep -q "^OK multi deleted $sec\$" "$W/leak.multi" \
+grep -q "^OK multi deleted none $sec\$" "$W/leak.multi" \
 	&& ok "and its bytes came back out of layer 1 with dd" \
 	|| bad "etc/secrets.txt: dd did not reproduce the reported digest"
 
@@ -665,8 +712,24 @@ else
 fi
 
 summ=$("$OCIV" audit "$IMG/multi" | grep '^audit leak ')
-eq "multi's leak summary names layer 0 with both counts" \
-	"audit leak layer=0 deleted=6 shadowed=4 bytes=243" "$summ"
+# The expected blob digest is sha256sum over the file in blobs/, so this
+# line is also coreutils confirming the digest the finding names.
+m0blob=$(echo "$(blobfacts multi)" | cut -d, -f1 | rev | cut -d: -f2- | rev)
+eq "multi's leak summary names layer 0, its blob, and both counts" \
+	"audit leak layer=0 blob=$m0blob comp=none deleted=6 shadowed=4 bytes=243" "$summ"
+# And the same finding on the gzipped copy of the same layers names a
+# DIFFERENT blob with comp=gzip, which is the distinction a reader needs
+# before taking off= to the file: the offset counts bytes in the
+# uncompressed stream and the blob on disk is deflated.
+gzsumm=$("$OCIV" audit "$IMG/multigz" | grep '^audit leak layer=0 ')
+gzblob=$(echo "$(blobfacts multigz)" | cut -d, -f1 | rev | cut -d: -f2- | rev)
+eq "multigz's leak summary names the compressed blob and says so" \
+	"audit leak layer=0 blob=$gzblob comp=gzip deleted=6 shadowed=4 bytes=243" "$gzsumm"
+if [ "$m0blob" != "$gzblob" ]; then
+	ok "the two blobs really are different files, so the comparison is not vacuous"
+else
+	bad "the gzipped layer has the same blob digest as the plain one"
+fi
 # The bytes figure is a sum, so it can be right with the parts wrong.
 # Check it against the per-finding sizes rather than against a constant
 # written here, which would be ociv checked against ociv.

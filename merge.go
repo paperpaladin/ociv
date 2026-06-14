@@ -59,6 +59,14 @@ type Merged struct {
 	Redirects []SymRedirect
 	Entries   [][]Entry
 	DiffIDs   []string
+	// Per layer, the descriptor digest of the blob on disk and how it
+	// is compressed. The leak findings carry both: "layer 0 still
+	// holds it" means nothing to anyone holding a directory of blobs
+	// named by digest, and the offset in the finding is into the
+	// UNCOMPRESSED stream, so a reader has to know whether the blob
+	// needs inflating before the number applies to it.
+	LayerBlob []string
+	LayerComp []string
 }
 
 // resolveParents follows symlinks that appear as ANCESTORS of a path,
@@ -201,6 +209,12 @@ func (im *Image) Merge(wantContent bool) (*Merged, error) {
 		}
 		m.Entries = append(m.Entries, ents)
 		m.DiffIDs = append(m.DiffIDs, diff)
+		m.LayerBlob = append(m.LayerBlob, im.Manifest.Layers[i].dg())
+		comp, known := layerCompression(im.Manifest.Layers[i].mt())
+		if !known {
+			comp = "unknown"
+		}
+		m.LayerComp = append(m.LayerComp, comp)
 
 		// Pass one: whiteouts, against the lower layers only.
 		// The target goes through the same symlink resolution as any

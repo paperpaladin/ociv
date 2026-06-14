@@ -66,7 +66,7 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 473 passed, 0 failed |
+| assertions | 477 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
 | tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
@@ -77,11 +77,11 @@ Measured on 20 October 2026. `make test` prints all of them.
 | audit findings against the Python audit | 55 findings over 14 images, 0 differ |
 | construct counts against the Python census | 364 counts over 14 images, 0 differ |
 | member bytes against `tar -P -xOf` | 60 members, 0 differ, 2 duplicate paths apart |
-| leaked files pulled back out of the blob with `dd` | 16 |
+| leaked files pulled back out of the blob with `dd` | 26, of which 10 from a gzip blob |
 | broken images where skopeo also refuses | 8 of 19 |
 | malformed images in `make test` | 316 runs, 313 rejected, 0 crashed, 0 hung |
 | malformed images in `make sweep` | 26,660 runs, 26,492 rejected, 0 crashed, 0 hung |
-| mutants | 53 planted, 51 caught, 2 equivalent survivors |
+| mutants | 55 planted, 53 caught, 2 equivalent survivors |
 
 The tuple compared per member is (type, mode, uid, gid, size, name, link),
 with the name in hex. Not the number of entries: a reader that gets the size
@@ -126,18 +126,25 @@ layer that removed them, the size, and the offset of the data in the
 uncompressed layer stream:
 
 ```
-audit deleted  layer=0 by=2 size=61 off=3584  content=sha256:f0892cc6... phex=6574632f736563726574732e747874
-audit shadowed layer=0 by=1 delta=content size=55 off=1536 content=sha256:f5a3872f... new=sha256:7832b17b... newmode=0644 phex=6574632f636f6e6669672e696e69
-audit leak     layer=0 deleted=6 shadowed=4 bytes=243
+audit deleted  layer=0 by=2 blob=sha256:623019f4... comp=none size=61 off=3584 content=sha256:f0892cc6... phex=6574632f736563726574732e747874
+audit shadowed layer=0 by=1 blob=sha256:623019f4... comp=none delta=content size=55 off=1536 content=sha256:f5a3872f... new=sha256:7832b17b... newmode=0644 phex=6574632f636f6e6669672e696e69
+audit leak     layer=0 blob=sha256:623019f4... comp=none deleted=6 shadowed=4 bytes=243
 ```
 
-The offset is there so the finding can be checked rather than believed. The
-suite does check it, for all 16 leaked files in the uncompressed images: it
-reads `size` bytes from `off` in the layer tarball with `dd`, hashes them
-with `sha256sum`, and requires the result to be the digest the finding
-names. For `etc/config.ini` it goes further and looks at
-what came back, which is the token the merged tree's copy of that path no
-longer has.
+`blob` is the file in `blobs/sha256/` the bytes are in, because "layer 0"
+is an index into a manifest the reader may not have open. `comp` is there
+because `off` counts bytes in the uncompressed layer stream: on a gzip
+layer the blob has to be inflated before the offset means anything, and a
+finding that did not say so would send a reader to the wrong bytes.
+
+The offset is there so the finding can be checked rather than believed, and
+the suite checks all 26 of them. It opens the blob the finding names, not a
+tarball the harness kept, inflates it when `comp` says gzip, reads `size`
+bytes from `off` with `dd`, hashes them with `sha256sum`, and requires the
+result to be the digest in the finding. Ten of the 26 go through the gzip
+branch, so `comp` is read rather than assumed. For `etc/config.ini` it goes
+further and looks at what came back, which is the token the merged tree's
+copy of that path no longer has.
 
 `ociv cat IMAGE LAYER PATHHEX` writes that member's bytes to stdout, taking
 the `phex` field straight off the finding. The path is hex because a member
@@ -344,13 +351,6 @@ fails only the three malformed-input sweeps. Nothing else in the suite can
 see it, which is the whole argument for keeping the sweep in the gate.
 
 ## What does not work
-
-**The leak offset indexes the uncompressed layer, not the blob.** For a
-gzip layer the blob on disk is compressed and `off=` does not point into it,
-so a reader has to decompress first and the output does not say so. The
-`dd` check therefore runs over the uncompressed images only, which is 13 of
-the 14. The finding also names the layer by its index rather than by its
-blob digest, so acting on it means reading `ociv info` as well.
 
 **No zstd.** `application/vnd.oci.image.layer.v1.tar+zstd` is in the spec,
 Go's standard library has no decompressor for it, and ociv refuses the image

@@ -14,7 +14,8 @@ whiteouts, and the alternative to a second opinion is no opinion.
 
     oracle.py census LAYER.tar...   construct counts, one per line
     oracle.py tree   LAYER.tar...   the merged root filesystem
-    oracle.py audit  LAYER.tar...   the security-relevant findings
+    oracle.py audit  LAYER.tar... [--blobs D1:C1,D2:C2,...]
+                                   the security-relevant findings
 
 Standard library only.
 """
@@ -269,7 +270,27 @@ def is_cap(name):
     return name == "security.capability"
 
 
-def cmd_audit(layers):
+def cmd_audit(argv):
+    """The security report. --blobs carries one DIGEST:COMPRESSION per
+    layer, in order, because the blob a finding names is a fact about
+    the IMAGE and this script is handed the layer tarballs. The caller
+    computes those digests with sha256sum over the blob files, so the
+    digest in ociv's finding is checked against coreutils rather than
+    against anything either implementation derived."""
+    blobs = []
+    if "--blobs" in argv:
+        k = argv.index("--blobs")
+        blobs = argv[k + 1].split(",")
+        argv = argv[:k] + argv[k + 2:]
+    layers = argv
+
+    def blob(i):
+        return blobs[i].split(":", 2)[0] + ":" + blobs[i].split(":", 2)[1] \
+            if i < len(blobs) else "-"
+
+    def comp(i):
+        return blobs[i].rsplit(":", 1)[1] if i < len(blobs) else "-"
+
     state, deleted, shadowed, nowhere, all_entries, dangling, redirects = merge(layers)
     out = []
     for i, entries in enumerate(all_entries):
@@ -309,8 +330,10 @@ def cmd_audit(layers):
     for p, held, whl, node in deleted:
         if node.type != "file":
             continue
-        out.append("audit deleted layer=%d by=%d size=%d off=%d content=%s phex=%s" %
-                   (held, whl, node.size, node.offset, node.content, hx(p)))
+        out.append("audit deleted layer=%d by=%d blob=%s comp=%s size=%d off=%d "
+                   "content=%s phex=%s" %
+                   (held, whl, blob(held), comp(held), node.size, node.offset,
+                    node.content, hx(p)))
     for lay, lit, res, absolute, esc in redirects:
         if esc:
             out.append("audit symlink-escape layer=%d phex=%s" % (lay, hx(lit)))
@@ -334,10 +357,10 @@ def cmd_audit(layers):
             delta = "mode"
         else:
             delta = "none"
-        out.append("audit shadowed layer=%d by=%d delta=%s size=%d off=%d "
-                   "content=%s new=%s newmode=%04o phex=%s" %
-                   (oldl, newl, delta, old.size, old.offset, old.content,
-                    new.content, new.mode, hx(p)))
+        out.append("audit shadowed layer=%d by=%d blob=%s comp=%s delta=%s "
+                   "size=%d off=%d content=%s new=%s newmode=%04o phex=%s" %
+                   (oldl, newl, blob(oldl), comp(oldl), delta, old.size,
+                    old.offset, old.content, new.content, new.mode, hx(p)))
     # One line per layer still publishing content the merged filesystem
     # does not show. Both kinds counted: deleted is RUN rm, shadowed is a
     # later layer writing over the path and publishing both versions.
@@ -354,8 +377,8 @@ def cmd_audit(layers):
         per[oldl] = (d, sh + 1, by + old.size)
     for lay in sorted(per):
         d, sh, by = per[lay]
-        out.append("audit leak layer=%d deleted=%d shadowed=%d bytes=%d"
-                   % (lay, d, sh, by))
+        out.append("audit leak layer=%d blob=%s comp=%s deleted=%d shadowed=%d "
+                   "bytes=%d" % (lay, blob(lay), comp(lay), d, sh, by))
     for s in sorted(out):
         print(s)
 

@@ -21,6 +21,27 @@ import (
 
 func hx(s string) string { return hex.EncodeToString([]byte(s)) }
 
+// blob and comp name the layer a finding is about by the file it lives
+// in. "layer 0" is an index into a manifest the reader may not be
+// looking at; a digest is the name of a file in blobs/sha256/, which is
+// what a reader with the image in front of them can act on. comp is
+// there because the offset in the same finding counts bytes in the
+// UNCOMPRESSED stream, so for a gzip layer the number does not index
+// the blob until it has been inflated.
+func (m *Merged) blob(i int) string {
+	if i < 0 || i >= len(m.LayerBlob) {
+		return "-"
+	}
+	return m.LayerBlob[i]
+}
+
+func (m *Merged) comp(i int) string {
+	if i < 0 || i >= len(m.LayerComp) {
+		return "-"
+	}
+	return m.LayerComp[i]
+}
+
 // auditLines builds the whole report as sortable strings. Sorted output
 // means the Python second implementation's report can be diffed against
 // this one line for line instead of compared as a bag, which is a
@@ -80,8 +101,9 @@ func auditLines(m *Merged) []string {
 		if typeName(r.E.Type) != "file" {
 			continue
 		}
-		add("deleted layer=%d by=%d size=%d off=%d content=%s phex=%s",
-			r.Held, r.By, r.E.Size, r.E.Offset, r.E.ContentSHA, hx(r.Path))
+		add("deleted layer=%d by=%d blob=%s comp=%s size=%d off=%d content=%s phex=%s",
+			r.Held, r.By, m.blob(r.Held), m.comp(r.Held),
+			r.E.Size, r.E.Offset, r.E.ContentSHA, hx(r.Path))
 	}
 	// A path that did not land where its name said. Three different
 	// statements, because they call for three different reactions: a
@@ -122,8 +144,9 @@ func auditLines(m *Merged) []string {
 		case s.Old.Mode != s.New.Mode:
 			delta = "mode"
 		}
-		add("shadowed layer=%d by=%d delta=%s size=%d off=%d content=%s new=%s newmode=%04o phex=%s",
-			s.OldL, s.NewL, delta, s.Old.Size, s.Old.Offset,
+		add("shadowed layer=%d by=%d blob=%s comp=%s delta=%s size=%d off=%d content=%s new=%s newmode=%04o phex=%s",
+			s.OldL, s.NewL, m.blob(s.OldL), m.comp(s.OldL), delta,
+			s.Old.Size, s.Old.Offset,
 			s.Old.ContentSHA, s.New.ContentSHA, s.New.Mode, hx(s.Path))
 	}
 	// One line per layer that is still publishing content the merged
@@ -161,7 +184,8 @@ func auditLines(m *Merged) []string {
 		k.bytes += s.Old.Size
 	}
 	for l, k := range per {
-		add("leak layer=%d deleted=%d shadowed=%d bytes=%d", l, k.files, k.shadow, k.bytes)
+		add("leak layer=%d blob=%s comp=%s deleted=%d shadowed=%d bytes=%d",
+			l, m.blob(l), m.comp(l), k.files, k.shadow, k.bytes)
 	}
 	sort.Strings(out)
 	return out
