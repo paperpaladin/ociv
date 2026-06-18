@@ -81,8 +81,18 @@ mk m1 gnu 1000 100 "$R/m1"
 
 # L2: the deletions. A plain whiteout over the credential file, an opaque
 # directory, and one more overwrite.
-rm -rf "$R/m2"; mkdir -p "$R/m2/etc" "$R/m2/opt/data"
+rm -rf "$R/m2"; mkdir -p "$R/m2/etc" "$R/m2/opt/data" "$R/m2/home/user/.ssh"
 : > "$R/m2/etc/.wh.secrets.txt"
+# The deleted half of the leak finding, with something credential
+# shaped behind it. etc/secrets.txt is an AWS example key, which looks
+# like a credential to a person and matches nothing a scanner greps
+# for; the PEM header does, and until now the only PEM in the corpus
+# was in a file no layer removed. So the finding this program exists
+# for had a token behind its OVERWRITTEN half and nothing behind its
+# DELETED half. The body is the word notarealkey, which is the shape
+# the collection's secret audit exempts, and the audit exempts it by
+# content rather than by path.
+: > "$R/m2/home/user/.ssh/.wh.id_rsa"
 : > "$R/m2/opt/data/.wh..wh..opq"
 printf 'replaced\n' > "$R/m2/opt/data/new"
 printf 'root:x:0:0:root:/root:/bin/sh\ndaemon:x:1:1:daemon:/:/sbin/nologin\n' > "$R/m2/etc/passwd"

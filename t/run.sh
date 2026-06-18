@@ -190,7 +190,7 @@ floor escape 3
 floor longname 2
 floor dup-in-layer 1
 floor path-in-many-layers 5
-floor deleted 7
+floor deleted 8
 floor shadowed 3
 floor symlink-parent 3
 floor symlink-escape 2
@@ -672,6 +672,36 @@ grep -q "^OK multi deleted none $sec\$" "$W/leak.multi" \
 	&& ok "and its bytes came back out of layer 1 with dd" \
 	|| bad "etc/secrets.txt: dd did not reproduce the reported digest"
 
+# The deleted half of the finding, with a credential shape behind it.
+# multi's layer 0 writes a private key and layer 2 whiteouts it, which
+# is RUN rm /secrets exactly. The bytes are fetched with ociv cat using
+# the phex off the finding, so what is read is what a reader following
+# the report would read, and the PEM header is looked for in them
+# rather than the digest being compared to a constant.
+key=$(printf 'home/user/.ssh/id_rsa' | od -An -tx1 | tr -d ' \n')
+hasnt "the private key is not in the merged tree" multi home/user/.ssh/id_rsa
+keyline=$("$OCIV" audit "$IMG/multi" | grep "^audit deleted .*phex=$key\$")
+if [ -n "$keyline" ]; then
+	ok "but it is reported as deleted, with the layer that still holds it"
+else
+	bad "the deleted private key produced no finding"
+fi
+keylay=$(echo "$keyline" | tr ' ' '\n' | sed -n 's/^layer=//p')
+keybody=$("$OCIV" cat "$IMG/multi" "${keylay:-0}" "$key")
+# Split so this file does not itself contain the header it looks for:
+# a detector must not contain what it detects, and this repository's
+# own secret scan reads every blob in it.
+if echo "$keybody" | grep -q -- "-----BEGIN .*PRIVATE"' KEY-----'; then
+	ok "and its header comes back out of layer $keylay with ociv cat"
+else
+	bad "the deleted key did not come back with a PEM header in it"
+fi
+if echo "$keybody" | grep -q notarealkey; then
+	ok "the fixture is the provably fake one, not something that looks real"
+else
+	bad "the deleted key fixture is not the notarealkey one any more"
+fi
+
 # The loud line. One per layer that is still publishing content the
 # merged filesystem does not show, with both shapes of the leak counted
 # separately: deleted is RUN rm, shadowed is a later layer writing over
@@ -716,7 +746,7 @@ summ=$("$OCIV" audit "$IMG/multi" | grep '^audit leak ')
 # line is also coreutils confirming the digest the finding names.
 m0blob=$(echo "$(blobfacts multi)" | cut -d, -f1 | rev | cut -d: -f2- | rev)
 eq "multi's leak summary names layer 0, its blob, and both counts" \
-	"audit leak layer=0 blob=$m0blob comp=none deleted=6 shadowed=4 bytes=243" "$summ"
+	"audit leak layer=0 blob=$m0blob comp=none deleted=7 shadowed=4 bytes=291" "$summ"
 # And the same finding on the gzipped copy of the same layers names a
 # DIFFERENT blob with comp=gzip, which is the distinction a reader needs
 # before taking off= to the file: the offset counts bytes in the
@@ -724,7 +754,7 @@ eq "multi's leak summary names layer 0, its blob, and both counts" \
 gzsumm=$("$OCIV" audit "$IMG/multigz" | grep '^audit leak layer=0 ')
 gzblob=$(echo "$(blobfacts multigz)" | cut -d, -f1 | rev | cut -d: -f2- | rev)
 eq "multigz's leak summary names the compressed blob and says so" \
-	"audit leak layer=0 blob=$gzblob comp=gzip deleted=6 shadowed=4 bytes=243" "$gzsumm"
+	"audit leak layer=0 blob=$gzblob comp=gzip deleted=7 shadowed=4 bytes=291" "$gzsumm"
 if [ "$m0blob" != "$gzblob" ]; then
 	ok "the two blobs really are different files, so the comparison is not vacuous"
 else
@@ -735,7 +765,7 @@ fi
 # written here, which would be ociv checked against ociv.
 sumsz=$("$OCIV" audit "$IMG/multi" | awk '$2=="deleted" || $2=="shadowed" {
 		for (i=1;i<=NF;i++) if ($i ~ /^size=/) s += substr($i,6) } END {print s+0}')
-eq "and the byte total is the sum of the findings' sizes" "243" "$sumsz"
+eq "and the byte total is the sum of the findings' sizes" "291" "$sumsz"
 nleaklines=$(for i in $GOOD; do "$OCIV" audit "$IMG/$i"; done | grep -c '^audit leak ')
 if [ "$nleaklines" -ge 5 ]; then
 	ok "$nleaklines layers across the corpus are publishing removed content"
