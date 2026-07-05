@@ -222,7 +222,14 @@ Ranked, by how little of it we control:
       digest matches and the spec does not forbid the member name. Exit 3
       means "ociv cannot describe this image", and ociv can describe this
       one exactly; refusing would withhold the description a reader came
-      for. The entry is reported and kept out of the merged tree.
+      for.
+      correction: this used to end "the entry is reported and kept out of
+      the merged tree", which was never true of a member NAME that
+      escapes. ociv puts all three spellings at their normalised paths.
+      GNU tar, measured: a leading slash is stripped and the member lands
+      inside the root, which ociv matches, and a name containing dot-dot
+      is refused by name and nothing is written, which ociv does not. See
+      the next item.
 - [x] Symlinked parent directories, the three cases kept apart
       why: GNU tar 1.35 extracting `./bin/newfile` into a tree where `bin`
       is already a symlink to `usr/bin` writes `usr/bin/newfile`. Measured,
@@ -355,6 +362,19 @@ Ranked, by how little of it we control:
       that names the directory too is the case where tar may replace the
       symlink instead of following it, and the answer changes which path
       the file lands at.
+- [ ] Drop a dot-dot member from the merged tree, as GNU tar does
+      why: measured now. GNU tar 1.35 sanitises the name it was given,
+      finds dot-dot still in it, prints "Member name contains dot-dot",
+      writes nothing and exits 2. ociv puts the member at the path the
+      dot-dot resolves to, so the merged tree holds etc/shadow and
+      root/.ssh/authorized_keys and no unpacker produces either. The
+      contract says tree never reports a path no layer contains; it
+      should also never report a path no unpacker writes.
+- [ ] A hard link whose target is not in the image
+      why: the census counts hardlink-dangling and it is 0. GNU tar's
+      answer is measured already, as a side effect of the above: it
+      cannot make the link, says Cannot hard link, and leaves the path
+      absent. ociv keeps the entry with the header's size of 0.
 - [ ] Put ociv's diagnostic code in the skopeo verdict table
       why: the table prints "skopeo=accept ociv=reject" for nineteen
       images and the reason is in neither column, so the README had to

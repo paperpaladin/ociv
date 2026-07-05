@@ -901,6 +901,64 @@ hasnt "nothing written through the escaping symlink is in the tree" symescape up
 has   "the absolute symlink lands inside the image root"            symescape etc/passwd
 
 echo
+echo "--- what GNU tar does with a member name that leaves the root ---"
+# Three spellings in one layer, extracted for real into a scratch
+# directory and read back, because the whole escape finding rests on a
+# claim about what an unpacker would do and that claim was never
+# measured. The answers are not the same for all three, which is the
+# reason for measuring rather than arguing.
+rm -rf "$W/esc"; mkdir -p "$W/esc"
+tar -xpf "$L/escape.tar" -C "$W/esc" 2>"$W/esc.err"
+erc=$?
+if [ "$erc" != 0 ]; then
+	ok "GNU tar exits $erc on the escape layer: some members were not written"
+else
+	bad "GNU tar extracted the escape layer cleanly; the hazard has changed"
+fi
+# A leading slash: stripped, and the member lands INSIDE the root.
+if [ -f "$W/esc/absolute/path" ]; then
+	ok "a leading slash is stripped and /absolute/path lands at absolute/path"
+else
+	bad "GNU tar did not write the absolute member inside the root"
+fi
+# Dot-dot: refused by name, after being sanitised, so nothing is written.
+for m in "etc/shadow" "root/.ssh/authorized_keys"; do
+	if [ -e "$W/esc/$m" ]; then
+		bad "GNU tar wrote $m from a dot-dot member name"
+	else
+		ok "nothing was written at $m: the dot-dot member was dropped"
+	fi
+done
+if grep -q "Member name contains" "$W/esc.err"; then
+	ok "and tar says why: $(grep -c "Member name contains" "$W/esc.err") members contain dot-dot"
+else
+	bad "tar dropped them without saying why; the diagnostic has changed"
+fi
+# And the knock-on: a hard link whose target was one of the dropped
+# members cannot be made, so that path is missing too.
+if [ -e "$W/esc/hard-out" ]; then
+	bad "GNU tar created hard-out, whose target it refused to extract"
+else
+	ok "hard-out is absent too: its target was dropped, so the link could not be made"
+fi
+if grep -q "Cannot hard link" "$W/esc.err"; then
+	ok "and tar says so rather than creating an empty file"
+else
+	bad "tar did not report the failed hard link"
+fi
+# What ociv does today, recorded so that changing it is a decision. It
+# puts all three at their normalised paths, which agrees with tar for
+# the absolute one and does not for the other two.
+for m in "absolute/path" "etc/shadow" "root/.ssh/authorized_keys"; do
+	h=$(printf '%s' "$m" | od -An -tx1 | tr -d ' \n')
+	if "$OCIV" tree "$IMG/escape" | grep -q "phex=$h\$"; then
+		ok "ociv tree holds $m"
+	else
+		bad "ociv tree no longer holds $m; this section records that it does"
+	fi
+done
+
+echo
 echo "--- gzip: the descriptor digest and the diff_id are different numbers ---"
 # An uncompressed image cannot tell a reader that conflates the two apart
 # from a correct one, because there they are equal.
