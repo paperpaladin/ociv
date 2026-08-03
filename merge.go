@@ -269,6 +269,16 @@ func (im *Image) Merge(wantContent bool) (*Merged, error) {
 			if e.Whiteout != "" || e.Path == "" {
 				continue
 			}
+			// A name that still climbs above the root once a
+			// leading slash is off it is one GNU tar refuses to
+			// write, so it is not part of the filesystem this
+			// image unpacks to. It stays in m.Entries and the
+			// audit still reports it: dropping it silently would
+			// make the image look clean, and keeping it in the
+			// tree would report a path no unpacker produces.
+			if aboveRoot(e.Name) {
+				continue
+			}
 			// Where the entry actually lands, which is not where
 			// its name says when an ancestor is a symlink.
 			res, via, abs, esc := resolveParents(m.State, e.Path)

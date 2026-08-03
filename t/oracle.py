@@ -59,6 +59,32 @@ def clean(name):
     return "/".join(out), escapes, why
 
 
+def above_root(name):
+    """Does the name still climb above the root once a leading slash is
+    off it? That is the distinction GNU tar 1.35 draws, measured: it
+    strips a leading "/" and writes the member inside the extraction
+    directory, and it strips a leading "../" and then refuses the
+    result with "Member name contains '..'", writing nothing. clean()'s
+    escape reason cannot answer this, because a name that is both
+    absolute and climbing keeps the absolute reason.
+
+    A leading slash needs no special handling: it produces an empty
+    first component, which is skipped. The Go side stripped it first
+    and a mutation removing the strip survived, which is what said the
+    strip was doing nothing."""
+    depth = 0
+    for p in name.split("/"):
+        if p in ("", "."):
+            continue
+        if p == "..":
+            if depth == 0:
+                return True
+            depth -= 1
+        else:
+            depth += 1
+    return False
+
+
 def whiteout(path):
     """Classify a normalised path as a whiteout marker. The opaque marker is
     tested first because it also starts with '.wh.'; testing the prefix
@@ -224,6 +250,11 @@ def merge(layers):
                 continue            # markers are never in the result
             if path == "":
                 continue            # the root entry itself
+            if above_root(m.name):
+                # GNU tar refuses to write this member, so it is not
+                # part of the filesystem the image unpacks to. It stays
+                # in the entry list and the audit still reports it.
+                continue
             res, via, absolute, esc = resolve_parents(state, path)
             if via or esc:
                 redirects.append((i, path, res, absolute, esc))

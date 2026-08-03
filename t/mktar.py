@@ -188,14 +188,23 @@ def build_escape(path):
         plain_entry("./", mode=0o755, typeflag=b"5"),
         plain_entry("./etc/", mode=0o755, typeflag=b"5"),
         plain_entry("./etc/ok", content=b"this one is fine\n"),
-        # Four shapes of escape. They are not the same bug: the first is
-        # obvious, the second hides inside a path that starts legitimately,
-        # the third is an absolute name, and the fourth is an absolute
+        # Five shapes of escape. They are not the same bug: the first
+        # is obvious, the second hides inside a path that starts
+        # legitimately, the third is an absolute name, the fourth is
+        # absolute and climbing at once, and the fifth is an absolute
         # symlink target that only escapes when something follows it.
         plain_entry("../etc/shadow", content=b"root:!:0:0:::::\n"),
         plain_entry("etc/../../root/.ssh/authorized_keys",
                     content=b"ssh-rsa AAAA notarealkey\n"),
         plain_entry("/absolute/path", content=b"absolute\n"),
+        # Absolute AND climbing. GNU tar takes the slash off and then
+        # refuses what is left, because it still contains "..", so this
+        # one lands nowhere where /absolute/path lands inside the root.
+        # The two have to be in the corpus together or the rule that
+        # separates them is never exercised: a climb test that gives the
+        # leading empty component one level of credit gets this wrong
+        # and nothing else notices.
+        plain_entry("/../etc/leaked", content=b"climbed out\n"),
         plain_entry("./link-out", typeflag=b"2", linkname="/etc/passwd"),
         plain_entry("./link-up", typeflag=b"2", linkname="../../../etc/passwd"),
         plain_entry("./hard-out", typeflag=b"1", linkname="../etc/shadow"),

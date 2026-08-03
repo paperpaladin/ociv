@@ -122,6 +122,42 @@ func cleanPath(name string) (clean string, escapes bool, why string) {
 	return strings.Join(out, "/"), escapes, why
 }
 
+// aboveRoot reports whether a member name still climbs above the root
+// after a leading slash has been taken off it.
+//
+// That is the distinction GNU tar 1.35 draws, measured rather than
+// assumed: it strips a leading "/" and writes the member inside the
+// extraction directory, and it strips a leading "../" and then REFUSES
+// the result, printing "Member name contains '..'" and writing nothing.
+// So "/absolute/path" lands at absolute/path and "../etc/shadow" lands
+// nowhere, and a merged tree that treats the two the same reports a path
+// no unpacker produces.
+//
+// cleanPath's "why" cannot answer this, because a name that is both
+// absolute and climbing gets the absolute reason and keeps it.
+//
+// A leading slash needs no special handling: it produces an empty first
+// component, which is skipped, so the depth count starts at the same
+// place either way. The first version stripped it first and a mutation
+// that removed the strip survived, which is what said the strip was
+// doing nothing.
+func aboveRoot(name string) bool {
+	depth := 0
+	for _, p := range strings.Split(name, "/") {
+		switch p {
+		case "", ".":
+		case "..":
+			if depth == 0 {
+				return true
+			}
+			depth--
+		default:
+			depth++
+		}
+	}
+	return false
+}
+
 const (
 	whPrefix = ".wh."
 	whOpaque = ".wh..wh..opq"

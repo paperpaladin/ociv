@@ -186,7 +186,7 @@ floor sticky 1
 floor world-writable 4
 floor xattr 4
 floor capability 2
-floor escape 3
+floor escape 4
 floor longname 2
 floor dup-in-layer 1
 floor path-in-many-layers 5
@@ -922,7 +922,7 @@ else
 	bad "GNU tar did not write the absolute member inside the root"
 fi
 # Dot-dot: refused by name, after being sanitised, so nothing is written.
-for m in "etc/shadow" "root/.ssh/authorized_keys"; do
+for m in "etc/shadow" "root/.ssh/authorized_keys" "etc/leaked"; do
 	if [ -e "$W/esc/$m" ]; then
 		bad "GNU tar wrote $m from a dot-dot member name"
 	else
@@ -946,17 +946,17 @@ if grep -q "Cannot hard link" "$W/esc.err"; then
 else
 	bad "tar did not report the failed hard link"
 fi
-# What ociv does today, recorded so that changing it is a decision. It
-# puts all three at their normalised paths, which agrees with tar for
-# the absolute one and does not for the other two.
-for m in "absolute/path" "etc/shadow" "root/.ssh/authorized_keys"; do
-	h=$(printf '%s' "$m" | od -An -tx1 | tr -d ' \n')
-	if "$OCIV" tree "$IMG/escape" | grep -q "phex=$h\$"; then
-		ok "ociv tree holds $m"
-	else
-		bad "ociv tree no longer holds $m; this section records that it does"
-	fi
-done
+# ociv follows tar on all three. The absolute member is in the tree at
+# the path the slash-stripping produces; the two dot-dot members are
+# not in the tree at all, because no unpacker writes them. Both are
+# still reported by the audit: a path kept out of the tree and out of
+# the report is an image that looks clean.
+has   "ociv puts the absolute member inside the root too" escape absolute/path
+hasnt "and keeps the dot-dot member out of the tree"      escape etc/shadow
+hasnt "and the one that climbs out through a subdirectory" escape root/.ssh/authorized_keys
+nesc=$("$OCIV" audit "$IMG/escape" | grep -c '^audit escape ')
+eq "all four are still in the audit, which is where they belong" "4" "$nesc"
+hasnt "and the one that is absolute AND climbing is out of the tree too" escape etc/leaked
 
 echo
 echo "--- gzip: the descriptor digest and the diff_id are different numbers ---"
