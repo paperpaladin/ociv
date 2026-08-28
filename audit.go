@@ -105,6 +105,16 @@ func auditLines(m *Merged) []string {
 			r.Held, r.By, m.blob(r.Held), m.comp(r.Held),
 			r.E.Size, r.E.Offset, r.E.ContentSHA, hx(r.Path))
 	}
+	// A hard link the image does not carry the target for. Not a
+	// judgement: the format allows a layer to link to a path an
+	// earlier layer provided, and if no layer did, the image cannot
+	// be unpacked as written. GNU tar refuses the link and leaves
+	// the path absent, so the merged tree does not have it either,
+	// and this line is the only place it is mentioned.
+	for _, e := range m.DanglingLinks {
+		add("hardlink-dangling layer=%d target=%s phex=%s",
+			e.Layer, hx(e.Linkname), hx(e.Path))
+	}
 	// A path that did not land where its name said. Three different
 	// statements, because they call for three different reactions: a
 	// relative redirect is normal in images that symlink /bin to

@@ -377,10 +377,14 @@ Ranked, by how little of it we control:
       slash before counting and a mutation removing the strip
       survived: an empty component was already being skipped, so the
       strip was dead.
-- [ ] A hard link whose target is not in the image
+- [x] A hard link whose target is not in the image
       why: the census counts hardlink-dangling, which is 1 now that the
       dot-dot members are out of the tree, since hard-out points at
-      one of them. It is counted and not reported. GNU tar's
+      one of them. It is counted and not reported.
+      done: dropped from the tree and reported as
+      hardlink-dangling, which is what tar does, and the escape image
+      has joined the GNU tar extraction comparison as a result: its
+      8 merged paths now equal what tar actually wrote. GNU tar's
       answer is measured already, as a side effect of the above: it
       cannot make the link, says Cannot hard link, and leaves the path
       absent. ociv keeps the entry with the header's size of 0.

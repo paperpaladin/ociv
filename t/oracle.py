@@ -208,7 +208,7 @@ def merge(layers):
     deleted = []    # (path, layer_still_holding_it, whiteout_layer, node)
     shadowed = []   # (path, old_layer, new_layer, old_node, new_node)
     nowhere = []    # whiteouts that removed nothing
-    dangling = []   # hard links whose target is in no layer at or below
+    dangling = []   # (path, node) for hard links with no target below
     redirects = []  # (layer, literal, resolved, absolute, escaped)
     all_entries = []
 
@@ -273,7 +273,12 @@ def merge(layers):
                     node.size = tgt.size
                     node.content = tgt.content
                 else:
-                    dangling.append(node)
+                    # GNU tar cannot make the link and leaves the path
+                    # absent rather than empty: measured on the escape
+                    # layer, where the target is a member tar refused
+                    # to write. So the path is not in the result.
+                    dangling.append((path, node))
+                    continue
             old = state.get(path)
             if old is not None and (old.layer != i or old.index != n):
                 if old.content != node.content or old.mode != node.mode:
@@ -358,6 +363,9 @@ def cmd_audit(argv):
                 if lesc:
                     out.append("audit linkescape layer=%d target=%s phex=%s" %
                                (i, hx(m.linkname), hx(path)))
+    for p, node in dangling:
+        out.append("audit hardlink-dangling layer=%d target=%s phex=%s" %
+                   (node.layer, hx(node.link), hx(p)))
     for p, held, whl, node in deleted:
         if node.type != "file":
             continue

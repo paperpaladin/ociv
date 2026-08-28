@@ -465,11 +465,13 @@ extractfs() {  # extract.sh -> the same, with nlink dropped
 	       m = ($2=="l") ? "-" : $3;
 	       printf "fnode %s %s %s %s %s %s\n", $2, m, $4, $6, $7, $8 }' | sort -k7
 }
-# escape is excluded: GNU tar strips "../" and a leading "/" when it
-# extracts, so the paths on disk are not the paths in the archive and the
-# comparison would be measuring tar's sanitisation. ociv's handling of
-# those names is checked against the listing instead, where tar reports
-# them unchanged.
+# escape used to be excluded, on the argument that tar's sanitisation
+# would be what was measured rather than ociv. That was the wrong call:
+# measuring exactly that is the point. tar strips a leading slash and
+# writes the member inside the root, refuses a name still containing
+# dot-dot, and then cannot make a hard link whose target it refused.
+# ociv now does all three, so the two trees can simply be compared, and
+# the sanitisation is the thing under test rather than the excuse.
 #
 # symparent and symescape are excluded too, for a reason that belongs to
 # extract.sh rather than to tar: it unpacks each layer into a FRESH
@@ -479,7 +481,7 @@ extractfs() {  # extract.sh -> the same, with nlink dropped
 # behind, so the redirection this corpus exists to test never happens
 # there. They get their own comparison below, against tar extracting the
 # layers one after another into one directory.
-for img in single multi multigz longgnu longpax dup xattr opq samelayer symwh; do
+for img in single multi multigz longgnu longpax dup xattr escape opq samelayer symwh; do
 	rm -rf "$W/ex.$img"; mkdir -p "$W/ex.$img"
 	# tar creates intermediate directories no member names: the dup
 	# archive's only member is ./etc/dup and extracting it leaves an

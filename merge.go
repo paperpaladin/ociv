@@ -308,7 +308,19 @@ func (im *Image) Merge(wantContent bool) (*Merged, error) {
 					e.LinkResolved = true
 					e.LinkTo = t
 				} else {
+					// GNU tar cannot make this link and
+					// says so: "Cannot hard link to
+					// etc/shadow: No such file or
+					// directory", leaving the path absent
+					// rather than empty. Measured on the
+					// escape layer, where the target is a
+					// member tar refused to write. Keeping
+					// it would put a zero-length file in
+					// the tree where extraction produces
+					// nothing, and the entry is reported
+					// instead.
 					m.DanglingLinks = append(m.DanglingLinks, e)
+					continue
 				}
 			}
 			if old, ok := m.State[e.Path]; ok {

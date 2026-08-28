@@ -66,22 +66,22 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 477 passed, 0 failed |
+| assertions | 495 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
 | tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
 | the same tuples against python tarfile | 198 compared, 198 same, 0 differ |
 | member data offsets, and the bytes found at them | 86 members, 0 differ, 76 of them non-empty |
 | merged trees against the Python merge | 118 nodes over 14 images, 0 differ |
-| merged trees against GNU tar extracting the layers | 99 nodes over 11 images, 0 differ |
-| audit findings against the Python audit | 55 findings over 14 images, 0 differ |
+| merged trees against GNU tar extracting the layers | 105 nodes over 12 images, 0 differ |
+| audit findings against the Python audit | 59 findings over 14 images, 0 differ |
 | construct counts against the Python census | 364 counts over 14 images, 0 differ |
 | member bytes against `tar -P -xOf` | 60 members, 0 differ, 2 duplicate paths apart |
 | leaked files pulled back out of the blob with `dd` | 26, of which 10 from a gzip blob |
 | broken images where skopeo also refuses | 8 of 19 |
 | malformed images in `make test` | 316 runs, 313 rejected, 0 crashed, 0 hung |
 | malformed images in `make sweep` | 26,660 runs, 26,492 rejected, 0 crashed, 0 hung |
-| mutants | 55 planted, 53 caught, 2 equivalent survivors |
+| mutants | 58 planted, 56 caught, 2 equivalent survivors |
 
 The tuple compared per member is (type, mode, uid, gid, size, name, link),
 with the name in hex. Not the number of entries: a reader that gets the size
