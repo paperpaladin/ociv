@@ -105,6 +105,19 @@ func auditLines(m *Merged) []string {
 			r.Held, r.By, m.blob(r.Held), m.comp(r.Held),
 			r.E.Size, r.E.Offset, r.E.ContentSHA, hx(r.Path))
 	}
+	// A whiteout that removed nothing. Not an error: a layer may
+	// mark a path no lower layer has, and a build system that
+	// deletes a file it never shipped emits one. It is a fact about
+	// the image worth stating, because the reader's question is
+	// usually "did this marker do what the Dockerfile meant", and a
+	// marker that hit nothing is the answer "no".
+	for _, r := range m.NoTarget {
+		kind := "file"
+		if r.Opaque {
+			kind = "opaque"
+		}
+		add("whiteout-nothing layer=%d kind=%s phex=%s", r.By, kind, hx(r.Path))
+	}
 	// A hard link the image does not carry the target for. Not a
 	// judgement: the format allows a layer to link to a path an
 	// earlier layer provided, and if no layer did, the image cannot

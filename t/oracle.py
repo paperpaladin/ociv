@@ -363,6 +363,9 @@ def cmd_audit(argv):
                 if lesc:
                     out.append("audit linkescape layer=%d target=%s phex=%s" %
                                (i, hx(m.linkname), hx(path)))
+    for kind, target, lay in nowhere:
+        out.append("audit whiteout-nothing layer=%d kind=%s phex=%s" %
+                   (lay, kind, hx(target)))
     for p, node in dangling:
         out.append("audit hardlink-dangling layer=%d target=%s phex=%s" %
                    (node.layer, hx(node.link), hx(p)))

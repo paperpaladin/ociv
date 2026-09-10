@@ -267,11 +267,23 @@ def build_wh_same(path):
 
     The order matters and cannot be produced by "tar --sort=name", because
     ".wh.keepme" sorts before "keepme" and a one-pass reader then gets the
-    right answer by accident."""
+    right answer by accident.
+
+    Two more markers that remove nothing. A build system emits them
+    whenever it deletes a path that was never in the image, and they
+    are legal. A reader must not report them as deletions of
+    something, and until these existed the branch that notices had
+    never run: the census counted whiteout-hit-nothing and it was 0.
+    One is a plain marker for a name no lower layer has; the other is
+    an opaque marker in a directory no lower layer has at all, which
+    is a different code path from an opaque marker over an empty
+    directory."""
     parts = [
         plain_entry("./etc/keepme", content=b"the new version\n"),
         plain_entry("./etc/" + WH_PREFIX + "keepme"),
         plain_entry("./etc/" + WH_PREFIX + "gone"),
+        plain_entry("./etc/" + WH_PREFIX + "neverthere"),
+        plain_entry("./srv/nosuchdir/" + WH_OPAQUE),
     ]
     open(path, "wb").write(finish(parts))
 

@@ -175,7 +175,7 @@ floor() {
 }
 floor layers 10
 floor entries 90
-floor whiteout-file 2
+floor whiteout-file 3
 floor whiteout-opaque 1
 floor hardlink 2
 floor symlink 3
@@ -194,6 +194,8 @@ floor deleted 8
 floor shadowed 3
 floor symlink-parent 3
 floor symlink-escape 2
+floor whiteout-hit-nothing 2
+floor hardlink-dangling 1
 
 echo
 echo "--- oracle: skopeo and sha256sum agree on the manifest digest ---"
@@ -548,6 +550,24 @@ hasnt "but does remove the same name from a lower layer"       samelayer etc/gon
 newsha="sha256:$(printf 'the new version\n' | sha256sum | cut -d" " -f1)"
 gotsha=$("$OCIV" tree "$IMG/samelayer" | awk -v h="$(printf 'etc/keepme' | od -An -tx1 | tr -d " \n")" '$0 ~ ("phex=" h "$") {for(i=1;i<=NF;i++) if ($i ~ /^content=/) print substr($i,9)}')
 eq "the survivor is this layer's version of the file" "$newsha" "$gotsha"
+
+# A marker that removed nothing. Legal, and the reader's question is
+# usually whether the marker did what the Dockerfile meant, so a marker
+# that hit nothing is an answer rather than silence. Two shapes,
+# because they take different code paths: a plain marker for a name no
+# lower layer has, and an opaque marker in a directory no lower layer
+# has at all.
+nn=$("$OCIV" audit "$IMG/samelayer" | grep -c '^audit whiteout-nothing ')
+eq "the two markers that removed nothing are reported" "2" "$nn"
+nnf=$("$OCIV" audit "$IMG/samelayer" | grep -c '^audit whiteout-nothing layer=1 kind=file ')
+eq "one of them as a plain marker" "1" "$nnf"
+nno=$("$OCIV" audit "$IMG/samelayer" | grep -c '^audit whiteout-nothing layer=1 kind=opaque ')
+eq "and one as an opaque marker over a directory that is not there" "1" "$nno"
+# And they are not counted as deletions, which is the failure that
+# would make the leak report lie in the safe direction.
+nd=$("$OCIV" audit "$IMG/samelayer" | grep -c '^audit deleted ')
+eq "and neither is counted as a deletion" "2" "$nd"
+hasnt "the opaque marker did not invent the directory it is in" samelayer srv/nosuchdir
 
 echo
 echo "--- writing through a symlink an earlier layer left in the way ---"

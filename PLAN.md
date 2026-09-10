@@ -347,15 +347,21 @@ Ranked, by how little of it we control:
       writes both members of a duplicated path and cat gives the last,
       and GNU tar without -P will not name a member containing dot-dot
       at all.
-- [ ] A dangling hard link in the corpus
+- [x] A dangling hard link in the corpus
       why: the census counts hardlink-dangling and it is 0, so the
       branch that handles a link whose target is not in the layer has
       never been reached by a test. GNU tar has an opinion about such an
       archive and it has not been asked.
-- [ ] A whiteout marker that hits nothing
+      done: it arrived by itself when the dot-dot members left the
+      tree, and GNU tar was asked: Cannot hard link, path absent.
+- [x] A whiteout marker that hits nothing
       why: whiteout-hit-nothing is 0 for the same reason. A marker for a
       path no lower layer holds is legal, common in squashed images, and
       must not be reported as a deletion of something.
+      done: two of them, a plain marker and an opaque marker in a
+      directory no lower layer has, which are different code paths.
+      Reported as whiteout-nothing with the kind, and asserted not to
+      be counted as deletions.
 - [ ] What GNU tar does when the layer also names the symlinked parent
       why: the measured case has a layer writing ./bin/newfile where an
       earlier layer left bin as a symlink, and no ./bin/ member. A layer
