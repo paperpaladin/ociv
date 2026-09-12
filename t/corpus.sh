@@ -242,6 +242,17 @@ python3 "$HERE/mktar.py" sym-write "$L/symwrite.tar"
 python3 "$HERE/oci.py" assemble "$W/img/symparent" "$L/symbase.tar" "$L/symwrite.tar" > "$W/img/symparent.digest"
 
 # ---------------------------------------------------------------------------
+# symdir: the same base layer, and a second layer that writes through the
+# symlink AND names ./bin/ as a directory member. Measured: GNU tar then
+# REPLACES the symlink with a real directory and the file lands at
+# bin/newfile, not usr/bin/newfile. The comment on symparent has said so
+# since it was written and nothing in the corpus checked it, so the two
+# images are here together and differ only in that one member.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" symdir-write "$L/symdirwrite.tar"
+python3 "$HERE/oci.py" assemble "$W/img/symdir" "$L/symbase.tar" "$L/symdirwrite.tar" > "$W/img/symdir.digest"
+
+# ---------------------------------------------------------------------------
 # symwh: a whiteout marker under a symlinked directory. ./bin/.wh.existing
 # where bin is a symlink to usr/bin deletes usr/bin/existing, and the
 # staged extraction oracle agrees because rm -rf through a symlink is the

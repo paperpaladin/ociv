@@ -119,12 +119,13 @@ layers_of() {
 	opq)     echo "$L/opqbase.tar $L/opqmark.tar" ;;
 	samelayer) echo "$L/whbase.tar $L/whsame.tar" ;;
 	symparent) echo "$L/symbase.tar $L/symwrite.tar" ;;
+	symdir)  echo "$L/symbase.tar $L/symdirwrite.tar" ;;
 	symwh)   echo "$L/symbase.tar $L/symwh.tar" ;;
 	symout)  echo "$L/symoutbase.tar $L/symoutwrite.tar" ;;
 	symescape) echo "$L/symescbase.tar $L/symescwrite.tar" ;;
 	esac
 }
-GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symwh symout symescape"
+GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symdir symwh symout symescape"
 
 # blobfacts IMAGE -- "DIGEST:COMPRESSION" per layer, comma separated.
 #
@@ -582,21 +583,42 @@ has   "and so is the one that went through two symlinks"            symparent us
 # is the external authority for the relative case and the only part of
 # the suite that can see it: neither python's tarfile nor the staged
 # extraction follows a symlinked parent.
-rm -rf "$W/ex.symparent"; mkdir -p "$W/ex.symparent"
-python3 ./t/tarfacts.py names $(layers_of symparent) > "$W/named.symparent"
-./t/extract.sh --direct "$W/ex.symparent" $(layers_of symparent) | extractfs \
-	| awk -v NF2="$W/named.symparent" '
-	    BEGIN { while ((getline l < NF2) > 0) seen[l] = 1 }
-	    $2 == "d" && !($7 in seen) { next }
-	    { print }' > "$W/ex.symparent.facts"
-"$OCIV" tree "$IMG/symparent" | ocivfs > "$W/tr.symparent.facts"
+for sp in symparent symdir; do
+	rm -rf "$W/ex.$sp"; mkdir -p "$W/ex.$sp"
+	python3 ./t/tarfacts.py names $(layers_of "$sp") > "$W/named.$sp"
+	./t/extract.sh --direct "$W/ex.$sp" $(layers_of "$sp") | extractfs \
+		| awk -v NF2="$W/named.$sp" '
+		    BEGIN { while ((getline l < NF2) > 0) seen[l] = 1 }
+		    $2 == "d" && !($7 in seen) { next }
+		    { print }' > "$W/ex.$sp.facts"
+	"$OCIV" tree "$IMG/$sp" | ocivfs > "$W/tr.$sp.facts"
+	nex=$(wc -l < "$W/ex.$sp.facts")
+	if [ "$nex" -lt 1 ]; then
+		bad "$sp: sequential GNU tar extraction produced nothing"
+	else
+		diffeq "$sp merged tree ($nex paths): ociv vs sequential GNU tar extraction" \
+			"$W/ex.$sp.facts" "$W/tr.$sp.facts" tree-tar
+	fi
+done
 nex=$(wc -l < "$W/ex.symparent.facts")
-if [ "$nex" -lt 1 ]; then
-	bad "symparent: sequential GNU tar extraction produced nothing"
+# The same base layer, and a second layer that names ./bin/ as a
+# directory member before writing through it. GNU tar then replaces the
+# symlink with a real directory and the file lands literally, which is
+# the opposite answer from symparent and is decided by one member being
+# present. The comment on the symparent fixture has said so since it
+# was written and nothing checked it.
+has   "naming the parent directory puts the file at its literal path" symdir bin/newfile
+hasnt "and not where the symlink used to point"                       symdir usr/bin/newfile
+if [ -L "$W/ex.symdir/root/bin" ]; then
+	bad "GNU tar left bin a symlink even though the layer named it a directory"
 else
-	diffeq "symparent merged tree ($nex paths): ociv vs sequential GNU tar extraction" \
-		"$W/ex.symparent.facts" "$W/tr.symparent.facts" tree-tar
+	ok "GNU tar replaced the symlink with a real directory on disk"
 fi
+nsd=$("$OCIV" audit "$IMG/symdir" | grep -c '^audit symlink-parent ')
+eq "and ociv reports no redirected write for that image" "0" "$nsd"
+nsp=$("$OCIV" audit "$IMG/symparent" | grep -c '^audit symlink-parent ')
+eq "where the image without the directory member reports two" "2" "$nsp"
+
 # And the fact that makes the comparison above worth running at all: the
 # redirected path is present on disk and the literal one is not. Without
 # this, a tar that stopped following symlinked parents would agree with

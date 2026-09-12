@@ -66,7 +66,7 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 502 passed, 0 failed |
+| assertions | 524 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
 | tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
@@ -81,7 +81,7 @@ Measured on 20 October 2026. `make test` prints all of them.
 | broken images where skopeo also refuses | 8 of 19 |
 | malformed images in `make test` | 316 runs, 313 rejected, 0 crashed, 0 hung |
 | malformed images in `make sweep` | 26,660 runs, 26,492 rejected, 0 crashed, 0 hung |
-| mutants | 59 planted, 57 caught, 2 equivalent survivors |
+| mutants | 60 planted, 58 caught, 2 equivalent survivors |
 
 The tuple compared per member is (type, mode, uid, gid, size, name, link),
 with the name in hex. Not the number of entries: a reader that gets the size
@@ -178,9 +178,14 @@ layer left `bin` as a symlink to `usr/bin`, does not land at `bin/newfile`.
 GNU tar 1.35 writes it at `usr/bin/newfile`, exit 0, no diagnostic, and the
 symlink is left in place rather than replaced by a directory. Measured, with
 the extraction done for real and the result read back with `os.lstat`. The
-layer naming the file does not also name `./bin/` as a directory member,
-which is the case that makes tar follow the symlink; what tar does when the
-layer names the directory too is not measured here.
+layer naming the file does not also name `./bin/` as a directory member.
+
+That one member decides the answer. With it, GNU tar replaces the symlink
+with a real directory, exit 0 and no diagnostic again, and the file lands
+at `bin/newfile` with nothing at `usr/bin/newfile`. The corpus holds both
+images over the same base layer, differing only in whether `./bin/` is
+present, and both are compared against tar extracting the layers one after
+another into the same directory.
 
 So a reader that takes member names literally reports a filesystem no
 unpacker produces. ociv resolves a symlinked ancestor the way tar does: a
@@ -424,11 +429,9 @@ per-layer form that `skopeo copy` writes, which is the only producer it has
 been put to. Older Docker layouts with `repositories` files and nested
 `json` metadata are not read.
 
-**The symlinked-parent measurement covers one case of three.** The layer
-that writes through the symlink names only the file. A layer that also names
-the parent as a directory member, and a layer that creates the symlink and
-writes through it in the same archive, are both reachable shapes and neither
-has been extracted.
+**The symlinked-parent measurement covers two cases of three.** A layer
+that creates the symlink and writes through it in the same archive is a
+reachable shape and has not been extracted.
 
 **One machine, one skopeo, one tar.** Every number above comes from skopeo
 1.18.0, GNU tar 1.35, coreutils 9.7, Python 3.13.5 and Go 1.24.4 on one

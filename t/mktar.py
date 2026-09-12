@@ -30,6 +30,7 @@ outside the corpus.
     mktar.py sym-base OUT.tar
     mktar.py sym-write OUT.tar
     mktar.py sym-whiteout OUT.tar
+    mktar.py symdir-write OUT.tar
     mktar.py plat-amd64 OUT.tar
     mktar.py plat-arm64 OUT.tar
     mktar.py plat-armv7 OUT.tar
@@ -215,6 +216,25 @@ def build_escape(path):
         plain_entry("./etc/new\nline", content=b"newline in the name\n"),
         plain_entry("./etc/tab\there", content=b"tab in the name\n"),
         plain_entry('./etc/quote"and\\back', content=b"quoting\n"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
+def build_symdir_write(path):
+    """A layer that writes through a symlinked parent AND names the
+    parent as a directory member.
+
+    Measured: GNU tar 1.35 extracting this over a tree where bin is a
+    symlink to usr/bin REPLACES the symlink with a real directory and
+    writes bin/newfile literally, exit 0, no diagnostic. So the
+    redirection that symparent tests does not happen here, and which
+    of the two shapes a layer has decides where the file lands.
+
+    It pairs with sym-base, so the two images differ only in whether
+    the ./bin/ member is present."""
+    parts = [
+        plain_entry("./bin/", mode=0o755, typeflag=b"5"),
+        plain_entry("./bin/newfile", content=b"the parent is named here\n"),
     ]
     open(path, "wb").write(finish(parts))
 
@@ -408,6 +428,7 @@ def build_symesc_write(path):
 
 BUILDERS = {"caps": build_caps, "escape": build_escape,
             "sym-base": build_sym_base, "sym-write": build_sym_write,
+            "symdir-write": build_symdir_write,
             "sym-whiteout": build_sym_whiteout,
             "plat-amd64": build_plat("amd64"),
             "plat-arm64": build_plat("arm64"),

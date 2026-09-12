@@ -362,12 +362,17 @@ Ranked, by how little of it we control:
       directory no lower layer has, which are different code paths.
       Reported as whiteout-nothing with the kind, and asserted not to
       be counted as deletions.
-- [ ] What GNU tar does when the layer also names the symlinked parent
+- [x] What GNU tar does when the layer also names the symlinked parent
       why: the measured case has a layer writing ./bin/newfile where an
       earlier layer left bin as a symlink, and no ./bin/ member. A layer
       that names the directory too is the case where tar may replace the
       symlink instead of following it, and the answer changes which path
       the file lands at.
+      done: the symdir image, the same base layer plus a second layer
+      that names ./bin/ as a directory member. GNU tar replaces the
+      symlink with a real directory, exit 0, no diagnostic, and the
+      file lands at bin/newfile. ociv already agreed; nothing had
+      checked it.
 - [x] Drop a dot-dot member from the merged tree, as GNU tar does
       why: measured now. GNU tar 1.35 sanitises the name it was given,
       finds dot-dot still in it, prints "Member name contains dot-dot",
