@@ -252,6 +252,11 @@ python3 "$HERE/oci.py" assemble "$W/img/symparent" "$L/symbase.tar" "$L/symwrite
 python3 "$HERE/mktar.py" symdir-write "$L/symdirwrite.tar"
 python3 "$HERE/oci.py" assemble "$W/img/symdir" "$L/symbase.tar" "$L/symdirwrite.tar" > "$W/img/symdir.digest"
 
+# symsame: one layer that creates the symlink and then writes through
+# it. The third shape, and the only one a single-layer image can have.
+python3 "$HERE/mktar.py" symsame "$L/symsame.tar"
+python3 "$HERE/oci.py" assemble "$W/img/symsame" "$L/symsame.tar" > "$W/img/symsame.digest"
+
 # ---------------------------------------------------------------------------
 # symwh: a whiteout marker under a symlinked directory. ./bin/.wh.existing
 # where bin is a symlink to usr/bin deletes usr/bin/existing, and the

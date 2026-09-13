@@ -31,6 +31,7 @@ outside the corpus.
     mktar.py sym-write OUT.tar
     mktar.py sym-whiteout OUT.tar
     mktar.py symdir-write OUT.tar
+    mktar.py symsame OUT.tar
     mktar.py plat-amd64 OUT.tar
     mktar.py plat-arm64 OUT.tar
     mktar.py plat-armv7 OUT.tar
@@ -239,6 +240,25 @@ def build_symdir_write(path):
     open(path, "wb").write(finish(parts))
 
 
+def build_symsame(path):
+    """One layer that creates the symlink and then writes through it.
+
+    The third of the three shapes, and the one a single-layer image can
+    have. Measured: GNU tar 1.35 writes usr/bin/newfile and leaves bin a
+    symlink, exit 0, no diagnostic, which is the same answer as the
+    cross-layer case and not the same as the case where ./bin/ is named
+    as a directory. Order inside the archive is what makes it work, so
+    the symlink is written before the member that goes through it."""
+    parts = [
+        plain_entry("./", mode=0o755, typeflag=b"5"),
+        plain_entry("./usr/", mode=0o755, typeflag=b"5"),
+        plain_entry("./usr/bin/", mode=0o755, typeflag=b"5"),
+        plain_entry("./bin", typeflag=b"2", linkname="usr/bin"),
+        plain_entry("./bin/newfile", content=b"written in the same layer\n"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
 def build_opq_base(path):
     """A directory with contents, and a SIBLING whose name shares its
     prefix. Whiteouting "opt/data" must not touch "opt/database"; a
@@ -429,6 +449,7 @@ def build_symesc_write(path):
 BUILDERS = {"caps": build_caps, "escape": build_escape,
             "sym-base": build_sym_base, "sym-write": build_sym_write,
             "symdir-write": build_symdir_write,
+            "symsame": build_symsame,
             "sym-whiteout": build_sym_whiteout,
             "plat-amd64": build_plat("amd64"),
             "plat-arm64": build_plat("arm64"),

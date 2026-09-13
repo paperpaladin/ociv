@@ -66,7 +66,7 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 524 passed, 0 failed |
+| assertions | 541 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
 | tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
@@ -186,6 +186,12 @@ at `bin/newfile` with nothing at `usr/bin/newfile`. The corpus holds both
 images over the same base layer, differing only in whether `./bin/` is
 present, and both are compared against tar extracting the layers one after
 another into the same directory.
+
+The third shape is one layer that creates the symlink and then writes
+through it, which is all a single-layer image can do. Same answer as the
+cross-layer case: the file lands at `usr/bin/newfile` and the symlink is
+left alone. The rule is about order inside the archive, not about
+layering.
 
 So a reader that takes member names literally reports a filesystem no
 unpacker produces. ociv resolves a symlinked ancestor the way tar does: a
@@ -428,10 +434,6 @@ which is the line between a finding and noise, and it is a judgement.
 per-layer form that `skopeo copy` writes, which is the only producer it has
 been put to. Older Docker layouts with `repositories` files and nested
 `json` metadata are not read.
-
-**The symlinked-parent measurement covers two cases of three.** A layer
-that creates the symlink and writes through it in the same archive is a
-reachable shape and has not been extracted.
 
 **One machine, one skopeo, one tar.** Every number above comes from skopeo
 1.18.0, GNU tar 1.35, coreutils 9.7, Python 3.13.5 and Go 1.24.4 on one

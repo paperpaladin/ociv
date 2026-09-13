@@ -120,12 +120,13 @@ layers_of() {
 	samelayer) echo "$L/whbase.tar $L/whsame.tar" ;;
 	symparent) echo "$L/symbase.tar $L/symwrite.tar" ;;
 	symdir)  echo "$L/symbase.tar $L/symdirwrite.tar" ;;
+	symsame) echo "$L/symsame.tar" ;;
 	symwh)   echo "$L/symbase.tar $L/symwh.tar" ;;
 	symout)  echo "$L/symoutbase.tar $L/symoutwrite.tar" ;;
 	symescape) echo "$L/symescbase.tar $L/symescwrite.tar" ;;
 	esac
 }
-GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symdir symwh symout symescape"
+GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symdir symsame symwh symout symescape"
 
 # blobfacts IMAGE -- "DIGEST:COMPRESSION" per layer, comma separated.
 #
@@ -583,7 +584,7 @@ has   "and so is the one that went through two symlinks"            symparent us
 # is the external authority for the relative case and the only part of
 # the suite that can see it: neither python's tarfile nor the staged
 # extraction follows a symlinked parent.
-for sp in symparent symdir; do
+for sp in symparent symdir symsame; do
 	rm -rf "$W/ex.$sp"; mkdir -p "$W/ex.$sp"
 	python3 ./t/tarfacts.py names $(layers_of "$sp") > "$W/named.$sp"
 	./t/extract.sh --direct "$W/ex.$sp" $(layers_of "$sp") | extractfs \
@@ -618,6 +619,18 @@ nsd=$("$OCIV" audit "$IMG/symdir" | grep -c '^audit symlink-parent ')
 eq "and ociv reports no redirected write for that image" "0" "$nsd"
 nsp=$("$OCIV" audit "$IMG/symparent" | grep -c '^audit symlink-parent ')
 eq "where the image without the directory member reports two" "2" "$nsp"
+
+# The third shape: one layer that creates the symlink and writes
+# through it, which is all a single-layer image can do. Same answer as
+# the cross-layer case, and worth having because the rule is about tar
+# ORDER inside one archive rather than about layering.
+hasnt "a symlink made and written through in one layer still redirects" symsame bin/newfile
+has   "the file is where the symlink points"                            symsame usr/bin/newfile
+if [ -L "$W/ex.symsame/root/bin" ]; then
+	ok "and GNU tar left the symlink alone writing through it in one pass"
+else
+	bad "GNU tar replaced the symlink even though no directory member named it"
+fi
 
 # And the fact that makes the comparison above worth running at all: the
 # redirected path is present on disk and the literal one is not. Without
