@@ -1149,11 +1149,33 @@ for d in "$IMG"/bad-*; do
 	name=$(basename "$d")
 	rm -rf "$W/sk"
 	if skopeo copy "oci:$d:latest" "dir:$W/sk" >/dev/null 2>&1; then sk=accept; else sk=reject; fi
-	"$OCIV" verify "$d" >/dev/null 2>&1; orc=$?
+	"$OCIV" verify "$d" > "$W/ovout" 2>&1; orc=$?
 	case $orc in 0) ov=accept ;; 3) ov=refuse ;; *) ov=reject ;; esac
-	echo "$name skopeo=$sk ociv=$ov" >> "$W/skdiverge"
+	# The reason, from ociv's own first diagnostic. Without it the
+	# table says eleven images are accepted by skopeo and rejected
+	# here and leaves the reader to go and find out why each, which
+	# is how the README ended up carrying a hand-written column
+	# that nothing kept in step with the code.
+	why=$(sed -n 's/^BAD \([A-Z0-9]*\) \(.*\)$/\1 \2/p' "$W/ovout" | head -1)
+	[ -n "$why" ] || why=$(sed -n 's/^ociv: REFUSE: //p' "$W/ovout" | head -1)
+	[ -n "$why" ] || why=$(sed -n 's/^ociv: //p' "$W/ovout" | head -1)
+	[ -n "$why" ] || why="-"
+	echo "$name skopeo=$sk ociv=$ov $why" >> "$W/skdiverge"
 done
-sed 's/^/     /' "$W/skdiverge"
+cut -c1-118 "$W/skdiverge" | sed 's/^/     /'
+# The reason column has to be a measurement too: a table whose third
+# field is empty on every row says nothing and looks like it says
+# something.
+nowhy=$(awk '$4=="-"' "$W/skdiverge" | wc -l)
+eq "every image in the table has a reason beside its verdict" "0" "$nowhy"
+# And every rejection names a code, not only the ones that reach the
+# findings list. bad-empty-index used to be the exception: it failed
+# while opening the image, printed a bare sentence and exited 1, so
+# there was nothing to grep for and nothing to put in the table.
+nocode=$(awk '$3=="ociv=reject" && $4 !~ /^V[0-9][0-9][0-9]$/' "$W/skdiverge" | wc -l)
+eq "every rejection names a Vnnn code" "0" "$nocode"
+eq "and an empty index is V003 rather than a sentence" "V003" \
+	"$(awk '$1=="bad-empty-index" {print $4}' "$W/skdiverge")"
 holes=$(awk '$2=="skopeo=reject" && $3=="ociv=accept"' "$W/skdiverge" | wc -l)
 eq "no image skopeo rejects is accepted by ociv" "0" "$holes"
 nrej=$(grep -c 'skopeo=reject' "$W/skdiverge")

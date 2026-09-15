@@ -66,7 +66,7 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 541 passed, 0 failed |
+| assertions | 544 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
 | tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
@@ -233,10 +233,10 @@ means ociv cannot describe the image, which here it can.
 ## Where ociv and skopeo disagree
 
 Eleven of the nineteen deliberately broken images are accepted by `skopeo
-copy` and rejected by ociv. The harness prints the verdict pair for all
-nineteen every run rather than asserting a hand-written list, so a skopeo
-upgrade that changes a verdict shows up as a changed line. The code and
-reason below are ociv's own first diagnostic for each:
+copy` and rejected by ociv. The harness prints the verdict pair and ociv's
+own first diagnostic for all nineteen every run, so a skopeo upgrade that
+changes a verdict shows up as a changed line and the reason column cannot
+go stale against the code. This is that output, shortened:
 
 ```
 bad-no-oci-layout             accept/reject V001 the oci-layout file is missing
@@ -251,6 +251,14 @@ bad-diffid-count              accept/reject V018 5 diff_ids for 4 layers
 bad-diffid-mismatch           accept/reject V019 a diff_id is not the layer's uncompressed digest
 bad-zstd-layer                accept/refuse      zstd, which ociv has no decompressor for
 ```
+
+Every rejection names a code. `bad-empty-index` used to be the exception:
+it failed while opening the image, printed a bare sentence and exited 1,
+so there was nothing to grep for and nothing to put in the table. The
+codes that appear only in that path are V003 an empty index or manifest
+list, V005 a selector matching nothing, V006 a docker-archive member not
+named by a digest, V023 a missing `index.json` and V024 JSON that will not
+parse.
 
 ociv follows the spec, and the reason is what it is for. skopeo's job is to
 move an image from one place to another, so a field it does not need to read

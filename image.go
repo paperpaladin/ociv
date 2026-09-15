@@ -22,6 +22,15 @@ type invalidErr struct{ error }
 
 func (e invalidErr) Unwrap() error { return e.error }
 
+// Every message starts with a Vnnn code, the same vocabulary the
+// findings use. A verdict without one cannot be grepped for and cannot
+// be put in a table beside skopeo's verdict, which is how the README
+// ended up carrying a hand-written column of reasons. The codes that
+// only appear here are V003 an empty index or manifest list, V005 a
+// selector that matches nothing, V006 a docker-archive member not
+// named by a digest, V023 a missing index.json and V024 JSON that will
+// not parse. The wrapping sites pass the inner error through %w, so the
+// inner code survives.
 func invalidf(format string, a ...any) error {
 	return invalidErr{fmt.Errorf(format, a...)}
 }
@@ -411,10 +420,10 @@ func (im *Image) openArchive() error {
 		Layers   []string `json:"Layers"`
 	}
 	if err := json.Unmarshal(mb, &entries); err != nil {
-		return invalidf("%s/manifest.json: %w", im.Path, err)
+		return invalidf("V024 %s/manifest.json: %w", im.Path, err)
 	}
 	if len(entries) == 0 {
-		return invalidf("%s/manifest.json: no entries", im.Path)
+		return invalidf("V003 %s/manifest.json: no entries", im.Path)
 	}
 	pick := -1
 	for i, e := range entries {
@@ -430,7 +439,7 @@ func (im *Image) openArchive() error {
 		}
 	}
 	if pick < 0 {
-		return invalidf("%s: no entry matches %q", im.Path, im.Selector)
+		return invalidf("V005 %s: no entry matches %q", im.Path, im.Selector)
 	}
 	if im.Selector == "" && len(entries) > 1 {
 		refuse("%s holds %d images and no selector was given; append :TAG", im.Path, len(entries))
@@ -456,7 +465,7 @@ func (im *Image) openArchive() error {
 	}
 	cdg, ok := nameDigest(e.Config, ".json")
 	if !ok {
-		return invalidf("%s: config member %q is not named by a sha256 digest", im.Path, e.Config)
+		return invalidf("V006 %s: config member %q is not named by a sha256 digest", im.Path, e.Config)
 	}
 	ar.names[cdg] = e.Config
 	mt := mtDockerConfig
@@ -465,7 +474,7 @@ func (im *Image) openArchive() error {
 	for _, ln := range e.Layers {
 		ldg, ok := nameDigest(ln, ".tar")
 		if !ok {
-			return invalidf("%s: layer member %q is not named by a sha256 digest", im.Path, ln)
+			return invalidf("V006 %s: layer member %q is not named by a sha256 digest", im.Path, ln)
 		}
 		ar.names[ldg] = ln
 		lmt := mtDockerLayer
@@ -480,7 +489,7 @@ func (im *Image) openArchive() error {
 	}
 	im.ConfigRaw = cb
 	if err := json.Unmarshal(cb, &im.Config); err != nil {
-		return invalidf("config %s: %w", cdg, err)
+		return invalidf("V024 config %s: %w", cdg, err)
 	}
 	if im.Config.RootFS.Type != "layers" {
 		im.note("V017", "config.rootfs", "type is %q, spec requires \"layers\"", im.Config.RootFS.Type)
@@ -515,11 +524,11 @@ func (im *Image) openLayout() error {
 
 	ib, err := os.ReadFile(filepath.Join(im.Path, "index.json"))
 	if err != nil {
-		return invalidf("%s: no index.json: %w", im.Path, err)
+		return invalidf("V023 %s: no index.json: %w", im.Path, err)
 	}
 	im.IndexRaw = ib
 	if err := json.Unmarshal(ib, &im.Index); err != nil {
-		return invalidf("%s/index.json: %w", im.Path, err)
+		return invalidf("V024 %s/index.json: %w", im.Path, err)
 	}
 	if im.Index.SchemaVersion == nil {
 		im.note("V004", "index.json", "no schemaVersion field")
@@ -527,7 +536,7 @@ func (im *Image) openLayout() error {
 		im.note("V004", "index.json", "schemaVersion is %d, spec requires 2", *im.Index.SchemaVersion)
 	}
 	if len(im.Index.Manifests) == 0 {
-		return invalidf("%s/index.json: no manifests", im.Path)
+		return invalidf("V003 %s/index.json: no manifests", im.Path)
 	}
 	im.Src = ociLayout{root: im.Path}
 
@@ -598,7 +607,7 @@ func (im *Image) selectFrom(all []Descriptor, where string) (Descriptor, error) 
 			had = append(had, d.Platform.String())
 		}
 		sort.Strings(had)
-		return Descriptor{}, invalidf("no manifest in %s matches %s; it holds %s",
+		return Descriptor{}, invalidf("V005 no manifest in %s matches %s; it holds %s",
 			where, what, strings.Join(had, " "))
 	}
 	if len(cands) > 1 {
@@ -663,10 +672,10 @@ func (im *Image) loadManifest() error {
 		}
 		var inner Index
 		if err := json.Unmarshal(b, &inner); err != nil {
-			return invalidf("nested index %s: %w", im.ManifestDigest, err)
+			return invalidf("V024 nested index %s: %w", im.ManifestDigest, err)
 		}
 		if len(inner.Manifests) == 0 {
-			return invalidf("nested index %s has no manifests", im.ManifestDigest)
+			return invalidf("V003 nested index %s has no manifests", im.ManifestDigest)
 		}
 		// The tag was already spent selecting this index out of
 		// index.json, and the entries below it carry platforms rather
@@ -686,7 +695,7 @@ func (im *Image) loadManifest() error {
 	}
 
 	if err := json.Unmarshal(b, &im.Manifest); err != nil {
-		return invalidf("manifest %s: %w", im.ManifestDigest, err)
+		return invalidf("V024 manifest %s: %w", im.ManifestDigest, err)
 	}
 	m := &im.Manifest
 	if m.SchemaVersion == nil {
@@ -707,7 +716,7 @@ func (im *Image) loadManifest() error {
 	}
 	im.ConfigRaw = cb
 	if err := json.Unmarshal(cb, &im.Config); err != nil {
-		return invalidf("config %s: %w", m.Config.dg(), err)
+		return invalidf("V024 config %s: %w", m.Config.dg(), err)
 	}
 	if im.Config.RootFS.Type != "layers" {
 		im.note("V017", "config.rootfs", "type is %q, spec requires \"layers\"", im.Config.RootFS.Type)
@@ -739,7 +748,7 @@ func (im *Image) loadManifest() error {
 func (im *Image) readBlob(d Descriptor, where string) ([]byte, error) {
 	if d.Digest == nil {
 		im.note("V007", where, "descriptor has no digest field")
-		return nil, invalidf("%s: descriptor has no digest", where)
+		return nil, invalidf("V007 %s: descriptor has no digest", where)
 	}
 	if d.Size == nil {
 		im.note("V007", where, "descriptor has no size field")
