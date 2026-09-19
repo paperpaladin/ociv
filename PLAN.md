@@ -318,7 +318,7 @@ Ranked, by how little of it we control:
       done: run() read os.Args over again instead of the
       list parsePlatform returned, so the flag only worked when it came
       after the command, and every test spelled it that way.
-- [ ] Content comparison of shadowed files across layers
+- [x] Content comparison of shadowed files across layers
       why: reporting that a path was overwritten is weaker than reporting
       that the bytes differ, and weaker still than reporting what the old
       bytes were.
@@ -326,6 +326,12 @@ Ranked, by how little of it we control:
       reported, with both digests, and the suite asserts delta=mode
       really does mean the digests are equal. The old bytes themselves
       still have to be fetched with dd.
+      done: with ociv cat they do not. The suite reads the old bytes
+      out of the old layer and the new bytes out of the new one for
+      every shadowed finding, checks both against the digests in the
+      finding, and requires delta=content to mean different bytes and
+      delta=mode to mean the same bytes. The one case cat cannot
+      address, a path one layer names twice, is counted and named.
 
 ### Milestone 7: what writing the README turned up
 

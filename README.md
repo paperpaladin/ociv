@@ -66,7 +66,7 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 544 passed, 0 failed |
+| assertions | 547 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
 | tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
@@ -170,6 +170,19 @@ lines is a leak nobody reads. Six layers across the corpus produce one.
 the mode, and the suite asserts both appear and that `delta=mode` really does
 mean the two digests are equal. Without that distinction every rebuilt layer
 reads as a second copy of the document.
+
+Both versions of a replaced path can be read back, because the finding names
+the layer that still holds the old one and the path, which is what `ociv cat`
+takes. The suite does that for all 8 shadowed findings it can: it fetches the
+old bytes from the old layer and the new bytes from the new one, checks each
+against the digest in the finding, and requires `delta=content` to mean the
+two really are different bytes and `delta=mode` to mean they are not. That is
+two reads from two layers rather than two digests ociv printed.
+
+The ninth is the one `ociv cat` cannot address: a path a single layer names
+twice. Both members answer to the same layer and path, so cat gives the last.
+The `off=` in the finding still reaches the earlier bytes, and the `dd` check
+does exactly that.
 
 ## Symlinked parent directories
 

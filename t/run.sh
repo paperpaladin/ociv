@@ -759,6 +759,59 @@ else
 	bad "the deleted key fixture is not the notarealkey one any more"
 fi
 
+# The old bytes themselves, not only a digest saying they differ. Every
+# shadowed finding names the layer that still holds the earlier version
+# and the path, which is exactly what ociv cat takes, so the two
+# versions of a replaced file can be put side by side. The assertion is
+# that the bytes cat returns hash to the content= the finding gives,
+# and that where delta says content the two versions really are
+# different bytes, read from two different layers rather than inferred
+# from two digests ociv printed.
+nsh=0 nshbad=0 nshsame=0
+for img in $GOOD; do
+	"$OCIV" audit "$IMG/$img" | grep '^audit shadowed ' |
+	while read -r _a _k rest; do
+		f() { echo "$rest" | tr ' ' '\n' | sed -n "s/^$1=//p"; }
+		ol=$(f layer); nl=$(f by); ph=$(f phex); want=$(f content)
+		new=$(f new); dl=$(f delta)
+		# A path named twice inside ONE layer cannot be read back
+		# this way: cat addresses a member by layer and path, and
+		# both versions answer to the same pair, so it gives the
+		# last. The off= in the finding still reaches the earlier
+		# bytes and the dd check above does exactly that. Counted
+		# rather than skipped silently.
+		if [ "$ol" = "$nl" ]; then
+			echo "SAMELAYER $img $ph"
+			continue
+		fi
+		og="sha256:$("$OCIV" cat "$IMG/$img" "$ol" "$ph" | sha256sum | cut -d" " -f1)"
+		ng="sha256:$("$OCIV" cat "$IMG/$img" "$nl" "$ph" | sha256sum | cut -d" " -f1)"
+		if [ "$og" != "$want" ]; then
+			echo "NO $img $ph old bytes hash $og, finding says $want"
+		elif [ "$ng" != "$new" ]; then
+			echo "NO $img $ph new bytes hash $ng, finding says $new"
+		elif [ "${dl#*content}" != "$dl" ] && [ "$og" = "$ng" ]; then
+			echo "NO $img $ph delta=$dl but both versions are the same bytes"
+		elif [ "$dl" = mode ] && [ "$og" != "$ng" ]; then
+			echo "NO $img $ph delta=mode but the bytes differ"
+		else
+			echo "OK $img $ph $dl"
+		fi
+	done > "$W/shadow.$img"
+	nsh=$((nsh + $(grep -c '^OK ' "$W/shadow.$img")))
+	nshbad=$((nshbad + $(grep -c '^NO ' "$W/shadow.$img")))
+	nshsame=$((nshsame + $(grep -c '^SAMELAYER ' "$W/shadow.$img")))
+	[ "$(grep -c '^NO ' "$W/shadow.$img")" = 0 ] || sed -n '/^NO /p' "$W/shadow.$img" | sed 's/^/       /'
+done
+eq "both versions of every replaced path come back out of their own layers" "0" "$nshbad"
+if [ "$nsh" -ge 8 ]; then
+	ok "$nsh replaced paths read back from both layers, old bytes and new"
+else
+	bad "only $nsh shadowed findings were read back: the comparison is thin"
+fi
+# The case cat cannot address, named rather than quietly dropped.
+eq "one replaced path is a duplicate inside one layer, which cat cannot reach" "1" "$nshsame"
+
 # The loud line. One per layer that is still publishing content the
 # merged filesystem does not show, with both shapes of the leak counted
 # separately: deleted is RUN rm, shadowed is a later layer writing over
