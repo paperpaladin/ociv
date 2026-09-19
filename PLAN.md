@@ -405,8 +405,11 @@ Ranked, by how little of it we control:
       answer is measured already, as a side effect of the above: it
       cannot make the link, says Cannot hard link, and leaves the path
       absent. ociv keeps the entry with the header's size of 0.
-- [ ] Put ociv's diagnostic code in the skopeo verdict table
+- [x] Put ociv's diagnostic code in the skopeo verdict table
       why: the table prints "skopeo=accept ociv=reject" for nineteen
       images and the reason is in neither column, so the README had to
       carry a hand-written third column saying which spec clause each
       one breaks.
+      done, and it found thirteen paths in image.go that reported an
+      invalid image with no code at all, because they fail before the
+      findings list exists.

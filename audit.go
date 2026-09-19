@@ -265,7 +265,8 @@ func cmdStats(im *Image) int {
 	}
 	c := map[string]int{}
 	for _, k := range []string{"layers", "entries", "whiteout-file",
-		"whiteout-opaque", "hardlink", "symlink", "chardev", "dir", "file",
+		"whiteout-opaque", "hardlink", "symlink", "chardev", "blockdev",
+		"fifo", "dir", "file",
 		"setuid", "setgid", "sticky", "world-writable", "xattr",
 		"capability", "escape", "longname", "dup-in-layer",
 		"path-in-many-layers", "deleted", "shadowed",

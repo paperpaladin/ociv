@@ -258,6 +258,14 @@ python3 "$HERE/mktar.py" symsame "$L/symsame.tar"
 python3 "$HERE/oci.py" assemble "$W/img/symsame" "$L/symsame.tar" > "$W/img/symsame.digest"
 
 # ---------------------------------------------------------------------------
+# devnode: a block device, a fifo and a character device, written as raw
+# headers because mknod needs privilege. The corpus had one character
+# device and nothing else, so typeflags 4 and 6 were never read.
+# ---------------------------------------------------------------------------
+python3 "$HERE/mktar.py" devnodes "$L/devnodes.tar"
+python3 "$HERE/oci.py" assemble "$W/img/devnode" "$L/devnodes.tar" > "$W/img/devnode.digest"
+
+# ---------------------------------------------------------------------------
 # symwh: a whiteout marker under a symlinked directory. ./bin/.wh.existing
 # where bin is a symlink to usr/bin deletes usr/bin/existing, and the
 # staged extraction oracle agrees because rm -rf through a symlink is the

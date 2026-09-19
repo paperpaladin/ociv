@@ -32,6 +32,7 @@ outside the corpus.
     mktar.py sym-whiteout OUT.tar
     mktar.py symdir-write OUT.tar
     mktar.py symsame OUT.tar
+    mktar.py devnodes OUT.tar
     mktar.py plat-amd64 OUT.tar
     mktar.py plat-arm64 OUT.tar
     mktar.py plat-armv7 OUT.tar
@@ -259,6 +260,35 @@ def build_symsame(path):
     open(path, "wb").write(finish(parts))
 
 
+def build_devnodes(path):
+    """A block device, a fifo and a second character device, as raw
+    headers.
+
+    The corpus had one character device, taken from /dev/null with
+    --transform because mknod needs privilege. Typeflags 4 and 6 were
+    therefore never read, and a reader that maps the typeflag byte
+    through a table gets a wrong answer for an unlisted entry without
+    anything noticing. Writing the headers directly needs no privilege
+    and GNU tar still lists them, which is what the comparison uses.
+
+    The major and minor numbers are different on each so that a reader
+    that swapped the two fields, or printed one twice, would disagree
+    with tar's listing. 7,0 is loop0 and 5,1 is console on Linux, and
+    the numbers matter here only because they must come back
+    unchanged."""
+    parts = [
+        plain_entry("./", mode=0o755, typeflag=b"5"),
+        plain_entry("./dev/", mode=0o755, typeflag=b"5"),
+        plain_entry("./dev/loop0", mode=0o660, typeflag=b"4",
+                    devmajor=7, devminor=0),
+        plain_entry("./dev/console", mode=0o600, typeflag=b"3",
+                    devmajor=5, devminor=1),
+        plain_entry("./dev/initctl", mode=0o600, typeflag=b"6"),
+        plain_entry("./dev/README", content=b"not a device\n"),
+    ]
+    open(path, "wb").write(finish(parts))
+
+
 def build_opq_base(path):
     """A directory with contents, and a SIBLING whose name shares its
     prefix. Whiteouting "opt/data" must not touch "opt/database"; a
@@ -449,7 +479,7 @@ def build_symesc_write(path):
 BUILDERS = {"caps": build_caps, "escape": build_escape,
             "sym-base": build_sym_base, "sym-write": build_sym_write,
             "symdir-write": build_symdir_write,
-            "symsame": build_symsame,
+            "symsame": build_symsame, "devnodes": build_devnodes,
             "sym-whiteout": build_sym_whiteout,
             "plat-amd64": build_plat("amd64"),
             "plat-arm64": build_plat("arm64"),

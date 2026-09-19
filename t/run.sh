@@ -121,12 +121,13 @@ layers_of() {
 	symparent) echo "$L/symbase.tar $L/symwrite.tar" ;;
 	symdir)  echo "$L/symbase.tar $L/symdirwrite.tar" ;;
 	symsame) echo "$L/symsame.tar" ;;
+	devnode) echo "$L/devnodes.tar" ;;
 	symwh)   echo "$L/symbase.tar $L/symwh.tar" ;;
 	symout)  echo "$L/symoutbase.tar $L/symoutwrite.tar" ;;
 	symescape) echo "$L/symescbase.tar $L/symescwrite.tar" ;;
 	esac
 }
-GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symdir symsame symwh symout symescape"
+GOOD="single multi multigz longgnu longpax dup xattr escape opq samelayer symparent symdir symsame symwh symout symescape devnode"
 
 # blobfacts IMAGE -- "DIGEST:COMPRESSION" per layer, comma separated.
 #
@@ -181,7 +182,9 @@ floor whiteout-file 3
 floor whiteout-opaque 1
 floor hardlink 2
 floor symlink 3
-floor chardev 1
+floor chardev 2
+floor blockdev 1
+floor fifo 1
 floor setuid 1
 floor setgid 1
 floor sticky 1
@@ -520,6 +523,24 @@ nl=$(./t/extract.sh "$W/ex.multi" $(layers_of multi) | awk '$8=="'"$(printf 'usr
 eq "GNU tar made usr/bin/app2 a hard link (nlink)" "2" "$nl"
 hl=$("$OCIV" tree "$IMG/multi" | awk '/phex='"$(printf 'usr/bin/app2' | od -An -tx1 | tr -d ' \n')"'$/ {print $6}')
 eq "ociv reports the hard link with the target's size, not the header's 0" "32" "$hl"
+
+# Device nodes and a fifo, which the census could not see until the
+# corpus had any. typeName maps the typeflag byte and the counter only
+# counted the keys it had been given, so a blockdev or fifo entry was
+# read correctly and counted as nothing. GNU tar is the authority for
+# what the headers say: its listing carries the type letter and the
+# major,minor pair in the size column, and the per-entry comparison
+# above covers both.
+eq "the block device is reported with its major and minor" \
+	"audit devnode layer=0 type=blockdev dev=7,0 phex=$(printf 'dev/loop0' | od -An -tx1 | tr -d ' \n')" \
+	"$("$OCIV" audit "$IMG/devnode" | grep 'type=blockdev')"
+eq "and the character device with different numbers, so a swap would show" \
+	"audit devnode layer=0 type=chardev dev=5,1 phex=$(printf 'dev/console' | od -An -tx1 | tr -d ' \n')" \
+	"$("$OCIV" audit "$IMG/devnode" | grep 'type=chardev')"
+nfifo=$("$OCIV" tree "$IMG/devnode" | grep -c '^node fifo ')
+eq "the fifo is in the merged tree as a fifo" "1" "$nfifo"
+nfd=$("$OCIV" audit "$IMG/devnode" | grep -c '^audit devnode ')
+eq "and is not counted as a device node, which it is not" "2" "$nfd"
 
 echo
 echo "--- the three whiteout rules, stated as facts about named paths ---"

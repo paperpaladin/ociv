@@ -429,7 +429,8 @@ def cmd_census(layers):
     state, deleted, shadowed, nowhere, all_entries, dangling, redirects = merge(layers)
     c = {k: 0 for k in (
         "layers", "entries", "whiteout-file", "whiteout-opaque", "hardlink",
-        "symlink", "chardev", "dir", "file", "setuid", "setgid", "sticky",
+        "symlink", "chardev", "blockdev", "fifo", "dir", "file",
+        "setuid", "setgid", "sticky",
         "world-writable", "xattr", "capability", "escape", "longname",
         "dup-in-layer", "path-in-many-layers", "deleted", "shadowed",
         "whiteout-hit-nothing", "merged-paths", "hardlink-dangling",
