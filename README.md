@@ -66,7 +66,7 @@ Measured on 20 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
-| assertions | 566 passed, 0 failed |
+| assertions | 574 passed, 0 failed |
 | manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
 | blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
 | tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
@@ -96,21 +96,30 @@ alone, so GNU tar lists all 25 members of it and ociv declines to read any.
 That image is in the corpus so the refused column counts something; a
 column that can only ever print zero is decoration.
 
-The other refusals are whole-image, there are five shapes of them, and each
-is put to skopeo on the same bytes:
+The other refusals are whole-image. The suite prints the whole roster with
+skopeo's verdict on the same bytes beside each, because the question a
+refusal raises is not whether it exited 3 but whether anything else reads
+the image:
 
 ```
-a zstd layer               skopeo accepts, ociv exits 3
-a sha512 descriptor        skopeo accepts, ociv exits 3
-an unregistered algorithm  skopeo rejects, ociv exits 3
-an index with several candidates and no selector   ociv exits 3
-an index nested two levels deep                    ociv exits 3
+a layer media type with no decompressor  skopeo=accept  tar+zstd
+a digest algorithm that is not sha256    skopeo=reject  blake3
+a registered algorithm we do not do      skopeo=accept  sha512
+an index with several candidates         skopeo=accept  3 manifests, no selector
+an index nested two levels deep          skopeo=reject
 ```
 
-The first two are the ones that matter: skopeo reads those images and ociv
-does not, which is a hole and is recorded as one rather than as caution. A
-refusal is never counted as a pass and never as a wrong answer; the harness
-asserts the status and the diagnostic separately.
+Two of the three skopeo reads are holes, and are recorded as holes rather
+than as caution: zstd and sha512 are in the spec and ociv has neither.
+
+The third is a disagreement rather than a hole. skopeo copies a flat index
+with three platforms and no selector by taking the first entry, so it
+verifies whatever architecture happens to be listed first. ociv refuses and
+lists the candidates, because picking one would mean reporting one image's
+digests under another image's name.
+
+A refusal is never counted as a pass and never as a wrong answer; the
+harness asserts the status and the diagnostic separately.
 
 ## The leak
 

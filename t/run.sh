@@ -1153,15 +1153,52 @@ echo "--- refusal is not a wrong answer ---"
 # Exit 3 and the word REFUSE. These are cases the spec permits and ociv
 # does not implement, which is a different claim from "your image is
 # broken" and leaves by a different door.
-for name in unknown-algorithm zstd-layer; do
-	out=$("$OCIV" verify "$IMG/bad-$name" 2>&1); rc=$?
-	eq "bad-$name exits 3 (refusal)" "3" "$rc"
-	if echo "$out" | grep -q "REFUSE"; then
-		ok "bad-$name says REFUSE"
+# The whole roster, printed. Every shape of refusal in one place with
+# skopeo's verdict on the same bytes beside it, because the question a
+# refusal raises is not "did it exit 3" but "does anything else read
+# this image". Where skopeo reads it and ociv does not, that is a hole
+# and the README says so; where skopeo refuses too, ociv is declining
+# something nothing on this machine reads.
+#
+# The list used to be two cases here and three more scattered through
+# the index sections, and the README carried a hand-written summary of
+# all five.
+: > "$W/refusals"
+refusal() {   # refusal LABEL IMAGEREF [ARG...]
+	rlabel=$1; rimg=$2; shift 2
+	rout=$("$OCIV" verify "$IMG/$rimg" "$@" 2>&1); rrc=$?
+	rm -rf "$W/sk"
+	if skopeo copy "oci:$IMG/${rimg%%:*}:latest" "dir:$W/sk" >/dev/null 2>&1; then
+		rsk=accept
 	else
-		bad "bad-$name exited 3 without saying REFUSE: $out"
+		rsk=reject
 	fi
-done
+	rwhy=$(echo "$rout" | sed -n 's/^ociv: REFUSE: //p' | head -1 | cut -c1-70)
+	eq "$rlabel exits 3" "3" "$rrc"
+	if [ -n "$rwhy" ]; then
+		ok "$rlabel says REFUSE and why"
+	else
+		bad "$rlabel exited 3 without a REFUSE line: $(echo "$rout" | head -1)"
+	fi
+	echo "$rlabel skopeo=$rsk $rwhy" >> "$W/refusals"
+}
+refusal "a layer media type with no decompressor" bad-zstd-layer
+refusal "a digest algorithm that is not sha256"  bad-unknown-algorithm
+refusal "a registered algorithm we do not do"    dg-sha512
+refusal "an index with several candidates"       multiarch
+refusal "an index nested two levels deep"        nested2
+sed 's/^/     /' "$W/refusals"
+nref=$(wc -l < "$W/refusals")
+if [ "$nref" -ge 5 ]; then
+	ok "$nref shapes of refusal, each with skopeo's verdict on the same bytes"
+else
+	bad "only $nref refusal shapes: the roster is not the whole list"
+fi
+# The half that matters: a refusal where skopeo reads the image is a
+# missing feature, and the count belongs in the output rather than in
+# somebody's memory of it.
+nhole=$(grep -c 'skopeo=accept' "$W/refusals")
+eq "three of them are images skopeo reads and ociv does not" "3" "$nhole"
 
 echo
 echo "--- the digest grammar, against skopeo ---"
