@@ -181,7 +181,7 @@ python3 "$HERE/oci.py" assemble "$W/img/dup" "$L/dup.tar" > "$W/img/dup.digest"
 # xattr: user.* attributes, set with os.setxattr and archived by GNU tar as
 # SCHILY.xattr.* pax records. This machine has no setfattr, no setcap and no
 # privilege to set security.capability on a real file, so the capability
-# case is built separately as raw pax records -- see t/mkcaps.py, and see
+# case is built separately as raw pax records -- see t/mktar.py caps, and see
 # the README, which says plainly that the capability half has python's
 # tarfile as its only reader-oracle and not a kernel.
 # ---------------------------------------------------------------------------

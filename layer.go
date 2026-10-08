@@ -231,9 +231,13 @@ func (im *Image) layerReader(i int) (r io.Reader, diffID func() string, closeFn 
 }
 
 // LayerEntries reads every tar member of layer i. The whole layer is
-// streamed; content is hashed only for regular files, and only up to
-// hashLimit bytes, because the deleted-file report wants to say which bytes
-// are still published and a digest is the shortest way to say it.
+// streamed; content is hashed for regular files only, because the
+// deleted-file report wants to say which bytes are still published and a
+// digest is the shortest way to say it. There is no cap on how much of a
+// member is hashed: this comment used to describe a hashLimit that has
+// never existed in the file, which would have been a real difference,
+// since a capped digest and a full one are not the same number and the
+// Python implementation computes the full one.
 func (im *Image) LayerEntries(i int, wantContent bool) ([]Entry, string, error) {
 	r, diffID, closeFn, err := im.layerReader(i)
 	if err != nil {

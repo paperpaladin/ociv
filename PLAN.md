@@ -9,13 +9,16 @@ ociv layers IMAGE          every tar entry of every layer, one fact per line
 ociv tree   IMAGE          the merged root filesystem after whiteouts are applied
 ociv audit  IMAGE          the security-relevant facts, one finding per line
 ociv stats  IMAGE          how many of each construct the image actually contains
+ociv cat    IMAGE LAYER PATHHEX   one member's bytes, to stdout
 ```
 
 `IMAGE` is either a directory holding an OCI image layout (`oci-layout`,
 `index.json`, `blobs/<alg>/<hex>`) or a `docker save` style tar
 (`manifest.json` plus per-layer directories). A `:tag` or `@sha256:...`
-suffix selects one manifest out of a multi-entry index; with no suffix and
-more than one entry, ociv refuses rather than guessing.
+suffix selects one manifest out of a multi-entry index, and --platform
+selects by the index entry's platform; with nothing left to narrow it and
+more than one entry, ociv refuses rather than guessing. The flag may come
+before or after the command.
 
 Pure Go, standard library only. `go.mod` has no require block and the build
 runs with `GOPROXY=off`, so a third-party import is a build failure and not a
@@ -62,7 +65,12 @@ Concretely, and checked by `make test`:
   was real and not merely something ociv dislikes.
 - For every layer, the set of (path, typeflag, mode, uid, gid, size,
   linkname) tuples from `ociv layers` equals the set GNU tar reports for the
-  same blob, entry for entry. Not "the same number of entries".
+  same blob, entry for entry. Not "the same number of entries". The suite
+  prints the total compared, the total that differ and the total refused,
+  because one assertion per layer does not say how many facts are behind
+  it.
+- For every regular file member, the bytes `ociv cat` writes are the bytes
+  `tar -P -xOf` writes for the same member.
 - The merged tree from `ociv tree` equals the tree produced by extracting the
   layers in order with GNU tar and then applying the whiteout rules with a
   second implementation written in Python against the spec text, not against
