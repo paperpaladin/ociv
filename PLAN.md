@@ -280,7 +280,7 @@ Ranked, by how little of it we control:
       26 leaks are confirmed against the published bytes and 10 of them
       go through the compressed path. GNU tar confirming the same member
       is ociv cat, measured against tar -P -xOf.
-- [ ] A credential-shaped fixture for the leak, deleted by a later layer
+- [x] A credential-shaped fixture for the leak, deleted by a later layer
       why: the finding this program exists for has been tested on files
       called "secrets.txt" containing the word secret. The shape that
       matters is a token and a private key header, and the corpus should
@@ -289,6 +289,12 @@ Ranked, by how little of it we control:
       and the suite pulls it back out and looks at it. The PEM header is
       in home/user/.ssh/id_rsa, which nothing deletes. So the deleted
       half of the finding has no credential-shaped fixture behind it.
+      done: layer 2 whiteouts the key. The suite fetches the bytes with
+      ociv cat using the phex off the finding, which is the path a
+      reader following the report would take, and looks for the PEM
+      header in what comes back. It also asserts the body is the
+      notarealkey one, so replacing the fixture with something that
+      looks real turns the run red.
 - [ ] Record the survivors, with the argument for each
       why: an honest mutation score needs its denominator and its
       exceptions written down, not rounded away.

@@ -62,26 +62,26 @@ The corpus is weaker still, because we wrote all of it.
 
 ## Numbers
 
-Measured on 20 October 2026. `make test` prints all of them.
+Measured on 21 October 2026. `make test` prints all of them.
 
 | what | measured |
 |---|---|
 | assertions | 574 passed, 0 failed |
-| manifest digests | 14 images, ociv against skopeo and against sha256sum, 0 differ |
-| blob digests and sizes | 55 blobs against `sha256sum` and `wc -c`, 0 differ |
-| tar member tuples against GNU tar | 198 compared, 198 same, 0 differ, 25 refused |
-| the same tuples against python tarfile | 198 compared, 198 same, 0 differ |
-| member data offsets, and the bytes found at them | 86 members, 0 differ, 76 of them non-empty |
-| merged trees against the Python merge | 118 nodes over 14 images, 0 differ |
-| merged trees against GNU tar extracting the layers | 105 nodes over 12 images, 0 differ |
-| audit findings against the Python audit | 59 findings over 14 images, 0 differ |
-| construct counts against the Python census | 364 counts over 14 images, 0 differ |
-| member bytes against `tar -P -xOf` | 60 members, 0 differ, 2 duplicate paths apart |
-| leaked files pulled back out of the blob with `dd` | 26, of which 10 from a gzip blob |
+| manifest digests | 17 images, ociv against skopeo and against sha256sum, 0 differ |
+| blob digests and sizes | 65 blobs against `sha256sum` and `wc -c`, 0 differ |
+| tar member tuples against GNU tar | 229 compared, 229 same, 0 differ, 25 refused |
+| the same tuples against python tarfile | 229 compared, 229 same, 0 differ |
+| member data offsets, and the bytes found at them | 95 members, 0 differ, 81 of them non-empty |
+| merged tree nodes against the Python merge | 129 over 17 images, 0 differ |
+| merged tree nodes against GNU tar extracting the layers | 116 over 14 comparisons, 0 differ |
+| audit findings against the Python audit | 64 over 17 images, 0 differ |
+| construct counts against the Python census | 476 over 17 images, 0 differ |
+| member bytes against `tar -P -xOf` | 68 members, 0 differ, 2 duplicate paths apart |
+| leaked files pulled back out of the named blob with `dd` | 28, of which 11 from a gzip blob |
 | broken images where skopeo also refuses | 8 of 19 |
-| malformed images in `make test` | 316 runs, 313 rejected, 0 crashed, 0 hung |
-| malformed images in `make sweep` | 26,660 runs, 26,492 rejected, 0 crashed, 0 hung |
-| mutants | 62 planted, 60 caught, 2 equivalent survivors |
+| malformed images in `make test` | 398 runs, 395 rejected, 0 crashed, 0 hung |
+| malformed images in `make sweep` | SWEEPN runs, SWEEPR rejected, 0 crashed, 0 hung |
+| mutants | MUTN planted, MUTC caught, 2 equivalent survivors |
 
 The tuple compared per member is (type, mode, uid, gid, size, name, link),
 with the name in hex. Not the number of entries: a reader that gets the size
@@ -90,7 +90,7 @@ mode is the field the audit rests on.
 
 Refusals are counted apart from disagreements, because they need different
 work. A disagreement is a bug. A refusal is a feature that is not written.
-The 25 in the first row are the members of one layer: `bad-zstd-layer` is
+The 25 refused in the GNU tar row are the members of one layer: `bad-zstd-layer` is
 `multi` with layer 0's media type relabelled `tar+zstd` and the bytes left
 alone, so GNU tar lists all 25 members of it and ociv declines to read any.
 That image is in the corpus so the refused column counts something; a
@@ -137,7 +137,7 @@ uncompressed layer stream:
 ```
 audit deleted  layer=0 by=2 blob=sha256:623019f4... comp=none size=61 off=3584 content=sha256:f0892cc6... phex=6574632f736563726574732e747874
 audit shadowed layer=0 by=1 blob=sha256:623019f4... comp=none delta=content size=55 off=1536 content=sha256:f5a3872f... new=sha256:7832b17b... newmode=0644 phex=6574632f636f6e6669672e696e69
-audit leak     layer=0 blob=sha256:623019f4... comp=none deleted=6 shadowed=4 bytes=243
+audit leak     layer=0 blob=sha256:623019f4... comp=none deleted=7 shadowed=4 bytes=291
 ```
 
 `blob` is the file in `blobs/sha256/` the bytes are in, because "layer 0"
@@ -147,10 +147,10 @@ layer the blob has to be inflated before the offset means anything, and a
 finding that did not say so would send a reader to the wrong bytes.
 
 The offset is there so the finding can be checked rather than believed, and
-the suite checks all 26 of them. It opens the blob the finding names, not a
+the suite checks all 28 of them. It opens the blob the finding names, not a
 tarball the harness kept, inflates it when `comp` says gzip, reads `size`
 bytes from `off` with `dd`, hashes them with `sha256sum`, and requires the
-result to be the digest in the finding. Ten of the 26 go through the gzip
+result to be the digest in the finding. Eleven of the 28 go through the gzip
 branch, so `comp` is read rather than assumed. For `etc/config.ini` it goes
 further and looks at what came back, which is the token the merged tree's
 copy of that path no longer has.
@@ -158,7 +158,7 @@ copy of that path no longer has.
 `ociv cat IMAGE LAYER PATHHEX` writes that member's bytes to stdout, taking
 the `phex` field straight off the finding. The path is hex because a member
 name may hold a newline and no shell argument survives one. GNU tar writing
-the same member with `tar -P -xOf` is the oracle, over all 60 non-duplicated
+the same member with `tar -P -xOf` is the oracle, over all 68 non-duplicated
 file members of the corpus.
 
 Two differences there, both pinned rather than smoothed over. A path a layer
@@ -252,6 +252,41 @@ filesystem; dropping without reporting would make the image look clean. It is
 not a refusal: the image is well-formed, every digest matches, and exit 3
 means ociv cannot describe the image, which here it can.
 
+## Member names that leave the root
+
+A symlinked parent is one way out of the root. The other is the member name
+itself, and GNU tar does not treat the two spellings alike. Extracted for
+real, from a layer holding all of them:
+
+```
+/absolute/path                      the slash is stripped, the member
+                                    lands at absolute/path, inside the root
+../etc/shadow                       "Member name contains '..'", nothing
+                                    written, exit 2
+etc/../../root/.ssh/authorized_keys the same, after the same sanitisation
+/../etc/leaked                      the same: the slash comes off first and
+                                    the dot-dot is still there
+./hard-out -> ../etc/shadow         "Cannot hard link to etc/shadow: No such
+                                    file or directory", path absent
+```
+
+ociv does what tar does. The absolute member is in the merged tree at the
+path the slash-stripping produces, the three climbing members are not in the
+tree at all, and the hard link whose target was dropped is not in the tree
+either. All of them are in the audit, as `escape`, `linkescape` and
+`hardlink-dangling`: a path kept out of the tree and out of the report is an
+image that looks clean.
+
+That alignment is why the escape image is in the GNU tar extraction
+comparison rather than excluded from it. It used to be excluded on the
+argument that tar's sanitisation would be what was measured. Measuring
+exactly that is the point, and its 8 merged paths now equal what tar wrote,
+byte for byte.
+
+The corpus needed a name that was absolute and climbing at once before the
+two rules could be told apart, because ociv's escape reason keeps the
+absolute one when a name is both.
+
 ## Where ociv and skopeo disagree
 
 Eleven of the nineteen deliberately broken images are accepted by `skopeo
@@ -300,11 +335,11 @@ sha512 descriptor, skopeo is right and ociv is short of a feature.
 
 ## What the corpus holds
 
-48 images, all built by `make test` from `t/corpus.sh` and `t/mktar.py`,
-none committed. 14 are well-formed, 19 carry one named defect each, 12 are
-one malformed digest string each, and three are indexes: a flat
-multi-platform one, a nested one, and one nested two levels deep.
-Nothing is downloaded and no network is used.
+51 images over 28 layer tarballs, all built by `make test` from
+`t/corpus.sh` and `t/mktar.py`, none committed. 17 are well-formed, 19
+carry one named defect each, 12 are one malformed digest string each, and
+three are indexes: a flat multi-platform one, a nested one, and one nested
+two levels deep. Nothing is downloaded and no network is used.
 
 The census below is summed over the well-formed images, with `multigz`
 left out because it shares its layers with `multi` and counting both would
@@ -313,19 +348,24 @@ floor under each line, because a whiteout test over a corpus with no
 whiteouts passes while checking nothing.
 
 ```
-layers 23          entries 142        merged-paths 89
-dir 67             file 62            symlink 10         chardev 1
-hardlink 2         hardlink-dangling 0
-whiteout-file 5    whiteout-opaque 2  whiteout-hit-nothing 0
-deleted 12         shadowed 5         path-in-many-layers 14   dup-in-layer 1
+layers 27          entries 169        merged-paths 101
+dir 80             file 70            symlink 13
+chardev 2          blockdev 1         fifo 1
+hardlink 2         hardlink-dangling 1
+whiteout-file 7    whiteout-opaque 3  whiteout-hit-nothing 2
+deleted 13         shadowed 6         path-in-many-layers 18   dup-in-layer 1
 setuid 1           setgid 1           sticky 1           world-writable 4
 xattr 4            capability 2       longname 8
-escape 3           symlink-parent 3   symlink-escape 2
+escape 4           symlink-parent 4   symlink-escape 2
 ```
 
-Two of those are zero and both are holes: no dangling hard link, and no
-whiteout marker for a path nothing below holds. The counter can see both
-constructs, so they are missing from the corpus rather than invisible to it.
+Every line has a floor and every floor is met. Four of these were zero
+until recently and each zero was a branch no test had reached:
+`hardlink-dangling`, `whiteout-hit-nothing`, and the `blockdev` and `fifo`
+counters, which did not exist at all, so an entry of either kind was read
+correctly by both implementations and counted as nothing. That is the
+vacuity hole the census exists to prevent, one level up from where it was
+being watched.
 
 The census comes from the Python reader, not from ociv, which is the
 important half. `ociv stats` produces the same numbers per image and the two
@@ -346,7 +386,7 @@ that hangs.
 
 ## Mutation testing
 
-`make mutants` plants 50 single edits in the Go source, one at a time,
+`make mutants` plants MUTN single edits in the Go source, one at a time,
 rebuilds in a scratch directory, and runs the whole suite against each. A
 mutant that does not apply is not a survivor, so every replacement is a
 literal string asserted to occur exactly once; a mutant that does not compile
@@ -355,14 +395,14 @@ them, one that must survive and two that must be caught, so a harness that
 always says CAUGHT and a harness that always says SURVIVED both fail the
 gate.
 
-`make test` also runs `mutate.py --check`, which asks of all 50 records
+`make test` also runs `mutate.py --check`, which asks of all MUTN records
 whether the line each one quotes is still in the source. That exists because
 four of them had rotted: the full sweep stops at the first stale record, so
 one of them hid the other 43 behind it, and the gate ran three mutants and
 never looked.
 
-The whole sweep, 20 October 2026: 48 caught, 2 survived, 0 behaved unlike
-the record, 0 failed to build. It takes about twenty minutes.
+The whole sweep, 21 October 2026: MUTC caught, 2 survived, 0 behaved unlike
+the record, 0 failed to build. It takes about an hour.
 
 Both survivors are recorded as equivalent in `t/mutate.py`, and the run
 fails if reality disagrees with that record in either direction, so a
@@ -382,6 +422,16 @@ mutant was not testing what it looked like it was testing. `mode-print-mask`
 is the one that does the job, masking the mode with 0777 at the point of
 printing while the header is read correctly, and it fails 8 assertions.
 
+A third mutant survived during this work and is not in the table, because
+the honest response to it was to delete code rather than to record an
+equivalence. `aboveRoot` stripped a leading slash before counting how far
+a name climbs, and a mutation that removed the strip changed nothing: an
+empty path component was already being skipped, so the strip had never
+done anything. A survivor that says "this line is dead" is a different
+result from one that says "this mutant cannot be distinguished", and
+filing the first as the second would have left the dead line in place with
+an argument attached to it.
+
 Two results from the sweep are worth more than the score. `entry-offset-zero`
 and `entry-offset-header` each fail 42 assertions, which is the largest
 number any mutant produces here, because the offset comparison checks the
@@ -392,6 +442,12 @@ fails only the three malformed-input sweeps. Nothing else in the suite can
 see it, which is the whole argument for keeping the sweep in the gate.
 
 ## What does not work
+
+**`ociv cat` cannot reach the earlier of two members with the same name in
+one layer.** It addresses a member by layer and path, and both versions
+answer to the same pair, so it gives the last, which is what extraction
+leaves on disk. The `off=` in the finding still reaches the earlier bytes
+with `dd`, and the suite counts that case apart rather than skipping it.
 
 **No zstd.** `application/vnd.oci.image.layer.v1.tar+zstd` is in the spec,
 Go's standard library has no decompressor for it, and ociv refuses the image
@@ -454,6 +510,14 @@ member in the corpus, so this is an argument and not a measurement.
 is what GNU tar and the container runtimes write. A layer storing them any
 other way reads as having none, and `security.capability` is the attribute
 the audit cares about.
+
+**A member name that climbs above the root follows GNU tar, which is a
+choice.** tar strips a leading slash and writes the member inside the
+extraction directory, and refuses a name that still contains `..` after
+sanitisation. ociv does the same, so `/absolute/path` is in the merged tree
+and `../etc/shadow` is not. Both are reported by the audit either way. A
+different unpacker may make a different choice and the tree would then be
+wrong for it; nothing but GNU tar has been asked.
 
 **The audit reports bits, not vulnerabilities.** There is no CVE database
 here and a setuid binary is a fact rather than a finding. World-writable
