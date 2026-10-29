@@ -1566,6 +1566,27 @@ tsum tree-tar     80 "merged tree nodes against GNU tar extracting the layers"
 tsum audit-py     40 "audit findings against the Python audit"
 tsum stats-py    300 "construct counts against the Python census"
 
+# The mutation table, checked for rot rather than run.
+#
+# A mutation entry is a pattern to find and a replacement. When the source is
+# refactored the pattern stops matching, and the entry is then neither killed
+# nor surviving: it does nothing. yamlc had five in that state, one for over a
+# month, so a published score of 73 killed out of 74 covered a table where
+# five entries tested nothing.
+#
+# t/mutate.py already had a --check mode that reports exactly this, and
+# nothing ran it. The mode was written and then wired to no caller, which is
+# the same defect as a tool in t/ that nothing calls. Running the full sweep
+# here is not an option, it takes about an hour; checking that every pattern
+# still applies takes under a second and catches the rot.
+note "the mutation table still applies"
+if cout=$(python3 ./t/mutate.py --check 2>&1); then
+	ok "$cout"
+else
+	no "a mutation target no longer applies, so the table tests less than it says"
+	echo "$cout" | sed 's/^/     /'
+fi
+
 echo
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
